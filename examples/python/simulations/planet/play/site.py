@@ -52,7 +52,7 @@ def begin_survey():
     seed = tuple(planet.terrain["seed"])
     survey = Survey(bodies, seed)
     lake_survey = LakeSurvey(planet, world.site_frame()[1], seed)
-    state["survey"] = (survey, lake_survey)
+    state.site.survey = (survey, lake_survey)
     world.start_survey(survey.points + lake_survey.points)
 
 
@@ -61,9 +61,9 @@ def update_outposts():
     back, the outposts chosen, their sites flattened and their pads drawn,
     the lakes chosen clear of the outposts' sites and the site's pad, and
     the height grid around the site asked for (update_rivers)."""
-    home = state["home"]
+    home = state.site.home
     home.height = world.site_height or 0.0
-    surveys = state["survey"]
+    surveys = state.site.survey
     if surveys is not None and surveys[0] == "rivers":
         update_rivers()
         return
@@ -73,8 +73,8 @@ def update_outposts():
     survey, lake_survey = surveys
     count = len(survey.points)
     found = survey.choose(heights[:count], taken=[], home=home)
-    state["outposts"] = [home] + sorted(found, key=lambda o: (o.body.index, o.name))
-    world.set_sites([o.site() for o in state["outposts"] if o.flat_radius > 0.0])
+    state.site.outposts = [home] + sorted(found, key=lambda o: (o.body.index, o.name))
+    world.set_sites([o.site() for o in state.site.outposts if o.flat_radius > 0.0])
     avoid = [(home.direction, SITE_BLEND_RADIUS)] + [(o.direction, o.blend_radius) for o in found
                                                      if o.body is planet]
     lakes = lake_survey.choose(heights[count:], avoid=avoid)
@@ -87,15 +87,15 @@ def update_outposts():
                  nearest / 1000.0), flush=True)
     frame = rivers.GridFrame(home.direction, planet.radius)
     world.request_height_grid(frame)
-    state["survey"] = ("rivers", frame, avoid)
-    pads.build(state["outposts"])
+    state.site.survey = ("rivers", frame, avoid)
+    pads.build(state.site.outposts)
 
 
 def update_rivers():
     """Once the height grid around the site is back: the rivers traced over
     it (shoonyakasha.planet.rivers), round the outposts' sites and the
     site's pad and out of the lakes, set, and the survey ended."""
-    _, frame, avoid = state["survey"]
+    _, frame, avoid = state.site.survey
     heights = world.height_grid()
     if heights is None:
         return
@@ -104,7 +104,7 @@ def update_rivers():
     print("[walker] rivers: %d, %d segments, %.0f km in all"
           % (len(found), sum(len(r.points) - 1 for r in found), river_length(found) / 1000.0), flush=True)
     world.end_survey()
-    state["survey"] = None
+    state.site.survey = None
     saving.restore_market()
 
 
@@ -162,29 +162,29 @@ def build_ship_model():
         engine.scene.set_material_float(entity, "gridStrength", 0.0)
         engine.scene.set_render_layer_mask(entity, 1)
         engine.scene.set_visible(entity, False)
-    state["ship_model"] = (root, result.entities)
+    state.site.ship_model = (root, result.entities)
 
 
 def place_ship(camera):
     """The ship's model relative to `camera`: the car's pose, banked and
     pitched (hovercar.Car.attitude), rising and falling HOVER_BOB once
     every HOVER_PERIOD while slow; and the engines' glow."""
-    car = state["car"]
+    car = state.vehicle.car
     if car is None:
         return
     centre = vehicle.car_position()
     right, up, forward = spaceflight.car_attitude()
-    if state["ship_model"] is not None:
-        root, meshes = state["ship_model"]
+    if state.site.ship_model is not None:
+        root, meshes = state.site.ship_model
         for entity in meshes:
             engine.scene.set_visible(entity, True)
         still = max(0.0, 1.0 - car.speed() / 10.0)
         bob = still * HOVER_BOB * math.sin(2.0 * math.pi * world.time / HOVER_PERIOD)
         engine.scene.set_position(root, sub(add(centre, scale(up, bob)), camera))
         engine.scene.set_rotation(root, euler_from_basis(scale(right, -1.0), up, scale(forward, -1.0)))
-    controls = state["car_controls"]
-    throttle = controls.throttle if state["driving"] else 0.0
-    if state["space"] is not None:
-        throttle = state["space_controls"].throttle
-    state["car_glows"].update(walking.view_basis(), sub(centre, camera), (right, up, forward), throttle,
-                              controls.boost and state["driving"] and state["space"] is None, car.speed())
+    controls = state.vehicle.controls
+    throttle = controls.throttle if state.vehicle.driving else 0.0
+    if state.space.ship is not None:
+        throttle = state.space.controls.throttle
+    state.ui.car_glows.update(walking.view_basis(), sub(centre, camera), (right, up, forward), throttle,
+                              controls.boost and state.vehicle.driving and state.space.ship is None, car.speed())

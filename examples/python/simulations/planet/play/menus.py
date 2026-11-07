@@ -67,13 +67,13 @@ HELP_COLUMNS = [
 
 def set_paused(on, section="Resume"):
     """The System screen shown on `section`, the slate closed; or hidden. The world stands still while it shows."""
-    system = state["system"]
+    system = state.ui.system
     if not on:
         system.show(False)
         if not args.check:
             settings.save()
         return
-    state["slate"].close(at_once=True)
+    state.ui.slate.close(at_once=True)
     system.show(True, section)
 
 
@@ -89,7 +89,7 @@ def apply_settings():
         if world.camera is not None:
             engine.scene.set_camera_fov(world.camera, world.fov)
     s = settings["hud_scale"]
-    for part in (state["hud"], state["map_view"], state["slate"], state["system"], state["start"]):
+    for part in (state.ui.hud, state.ui.map_view, state.ui.slate, state.ui.system, state.ui.start):
         if part is not None:
             part.set_scale(s)
     engine.render_scale = settings["render_scale"]
@@ -153,18 +153,18 @@ def settings_items():
 def status_items():
     """How the game stands."""
     def goal():
-        current = state["objectives"].current()
+        current = state.progress.objectives.current()
         return current.title if current is not None else "All done"
     return [{"stat": "Objective", "get": goal},
-            {"stat": "Objectives done", "get": lambda: "%d / %d" % (state["objectives"].index,
-                                                                    len(state["objectives"].goals))},
-            {"stat": "Credits", "get": lambda: fs.credits(state["market"].credits)},
-            {"stat": "Ore sold", "get": lambda: fs.mass(state["sold_kg"])},
+            {"stat": "Objectives done", "get": lambda: "%d / %d" % (state.progress.objectives.index,
+                                                                    len(state.progress.objectives.goals))},
+            {"stat": "Credits", "get": lambda: fs.credits(state.economy.market.credits)},
+            {"stat": "Ore sold", "get": lambda: fs.mass(state.economy.sold_kg)},
             {"stat": "Cells explored", "get": lambda: format(walking.game_numbers()["cells"], ",")},
-            {"stat": "Waypoints reached", "get": lambda: str(state["waypoints"])},
-            {"stat": "Contracts done / failed", "get": lambda: "%d / %d" % (state["contracts_done"],
-                                                                            state["contracts_failed"])},
-            {"stat": "Outposts found", "get": lambda: str(len(state["outposts"]))}]
+            {"stat": "Waypoints reached", "get": lambda: str(state.progress.waypoints)},
+            {"stat": "Contracts done / failed", "get": lambda: "%d / %d" % (state.contracts.done,
+                                                                            state.contracts.failed)},
+            {"stat": "Outposts found", "get": lambda: str(len(state.site.outposts))}]
 
 
 def system_screen():
@@ -190,7 +190,7 @@ def start_screen():
                ("Quit", None, lambda: os._exit(0))]
 
     def card(surface, left, top, width):
-        data = state["last_save"]
+        data = state.session.last_save
         return apps.save_card(surface, left, top, width, data) if data is not None else 0.0
     return slate.SystemScreen(engine, "A planet, a moon, a hover car", "Shoonyakasha", entries, card=card,
                               sort_order=4)
@@ -198,8 +198,8 @@ def start_screen():
 
 def start(continue_):
     """From the start's screen: the save loaded, or a new game."""
-    state["starting"] = False
-    state["start"].show(False)
+    state.session.starting = False
+    state.ui.start.show(False)
     if continue_:
         saving.load_game()
 

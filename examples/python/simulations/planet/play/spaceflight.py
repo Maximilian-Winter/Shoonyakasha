@@ -22,18 +22,18 @@ HOLD_GAIN = 1.5                 # 1/s: the nose hold's turn rate per radian left
 
 def car_body():
     """The world body the car is reckoned around: the one it hovers over or flew nearest."""
-    return state["car_body"] or planet
+    return state.vehicle.body or planet
 
 
 def car_attitude():
     """(right, up, forward) of the car as drawn: the ship's axes in space mode, else hovercar.Car.attitude."""
-    space = state["space"]
-    return space.axes() if space is not None else state["car"].attitude()
+    space = state.space.ship
+    return space.axes() if space is not None else state.vehicle.car.attitude()
 
 
 def time_warp():
     """How many times faster the world's clock runs: WARPS' in space mode, else 1."""
-    return WARPS[state["warp"]] if state["space"] is not None else 1
+    return WARPS[state.space.warp] if state.space.ship is not None else 1
 
 
 def space_ground(body):
@@ -54,20 +54,20 @@ def enter_space():
     """The car into space mode (G), at least SPACE_HEIGHT above the ground:
     a flight.Ship (hovercar.space_params) where it is, at its velocity,
     turned as drawn, with its tank and cargo, translation assist on."""
-    car, hud = state["car"], state["hud"]
-    if not state["driving"] or state["space"] is not None:
+    car, hud = state.vehicle.car, state.ui.hud
+    if not state.vehicle.driving or state.space.ship is not None:
         return False
     if car.height is None or car.height < SPACE_HEIGHT:
         hud.toast("Climb to %.0f m for space mode" % SPACE_HEIGHT, hud_module.WARNING)
         return False
     body = car_body()
     right, up, forward = car.attitude()
-    state["space"] = flight.Ship(add(body.centre(), car.position), add(body.velocity(), car.velocity),
+    state.space.ship = flight.Ship(add(body.centre(), car.position), add(body.velocity(), car.velocity),
                                  quat_from_basis(right, up, scale(forward, -1.0)),
-                                 params=hovercar.space_params(state["params"]["car"], SHIP_HALF), fuel=car.fuel,
+                                 params=hovercar.space_params(state.economy.params["car"], SHIP_HALF), fuel=car.fuel,
                                  cargo=car.cargo)
-    state["space_controls"] = flight.Controls(assist=True)
-    state["ship_time"], state["warp"] = world.time, 0
+    state.space.controls = flight.Controls(assist=True)
+    state.space.time, state.space.warp = world.time, 0
     hud.toast("Space mode: G back to the hover car within %.0f m of the ground" % HOVER_BACK)
     print("[walker] space mode", flush=True)
     return True
@@ -84,20 +84,20 @@ def leave_space(landed=False):
     """The car back to hovering (G), within HOVER_BACK of the ground, or
     `landed`: over the body under it, at its velocity relative to that
     body, its nose levelled, keeping its height; the time warp back to 1."""
-    ship, car = state["space"], state["car"]
+    ship, car = state.space.ship, state.vehicle.car
     if ship is None:
         return False
     body = world.body_under(ship.position)
     height = space_height(ship, body)
     if not landed and (height is None or height > HOVER_BACK):
-        state["hud"].toast("Come within %.0f m of the ground for the hover car" % HOVER_BACK, hud_module.WARNING)
+        state.ui.hud.toast("Come within %.0f m of the ground for the hover car" % HOVER_BACK, hud_module.WARNING)
         return False
     sync_car(ship, body, height)
     car.velocity = sub(ship.velocity, body.velocity()) if not ship.crashed else (0.0, 0.0, 0.0)
     car.target = max(hovercar.HOVER_MIN, min(hovercar.MAX_HEIGHT, height if height is not None else 0.0))
     car.turn = car.bank = car.pitch = 0.0
-    state["space"], state["warp"], state["hold"] = None, 0, None
-    state["car_controls"] = hovercar.CarControls()
+    state.space.ship, state.space.warp, state.space.hold = None, 0, None
+    state.vehicle.controls = hovercar.CarControls()
     print("[walker] hover car over the %s" % body.name, flush=True)
     return True
 
@@ -105,7 +105,7 @@ def leave_space(landed=False):
 def sync_car(ship, body, height):
     """The hover car's state from the ship's, over `body`: its position and
     velocity relative to it, its nose levelled, its height, its fuel."""
-    car = state["car"]
+    car = state.vehicle.car
     car.position = body.relative(ship.position)
     car.velocity = sub(ship.velocity, body.velocity())
     up = normalize(car.position)
@@ -117,7 +117,7 @@ def sync_car(ship, body, height):
             break
     car.height = height
     car.fuel = ship.fuel
-    state["car_body"] = None if body is planet else body
+    state.vehicle.body = None if body is planet else body
 
 
 def step_space(dt):
@@ -128,31 +128,31 @@ def step_space(dt):
     (`sync_car`). Touching the ground slower than LANDED_SPEED, or
     crashing, it is the hover car again; below WARP_HEIGHT the time warp
     goes back to 1."""
-    ship = state["space"]
+    ship = state.space.ship
     hold_nose()
-    end, t = world.time, state["ship_time"]
+    end, t = world.time, state.space.time
     body = world.body_under(ship.position)
     ground = space_ground(body)
     steps = 0
     while t + FLIGHT_STEP <= end and steps < MAX_FLIGHT_STEPS:
         world.time = t
-        ship.step(world.physics, state["space_controls"], FLIGHT_STEP, ground, wind=space_wind)
+        ship.step(world.physics, state.space.controls, FLIGHT_STEP, ground, wind=space_wind)
         t += FLIGHT_STEP
         steps += 1
     world.time = end
-    state["ship_time"] = t if steps < MAX_FLIGHT_STEPS else end
+    state.space.time = t if steps < MAX_FLIGHT_STEPS else end
     body = world.body_under(ship.position)
     height = space_height(ship, body)
     sync_car(ship, body, height)
     above = height if height is not None else length(body.relative(ship.position)) - body.radius
     if above < WARP_HEIGHT:
-        state["warp"] = 0
+        state.space.warp = 0
     relative = length(sub(ship.velocity, body.velocity()))
     if ship.crashed:
-        state["hud"].toast("Hard landing", hud_module.WARNING)
+        state.ui.hud.toast("Hard landing", hud_module.WARNING)
         leave_space(landed=True)
     elif ship.on_ground and relative < LANDED_SPEED:
-        state["hud"].toast("Landed on the %s" % body.name, GOOD_TOAST)
+        state.ui.hud.toast("Landed on the %s" % body.name, GOOD_TOAST)
         leave_space(landed=True)
 
 
@@ -160,29 +160,29 @@ def hold_nose():
     """With a nose hold (H), the space mode's pitch and yaw turning the nose
     along the velocity relative to the body the orbit is reckoned around
     (prograde) or against it (retrograde), at HOLD_GAIN (flight.point_controls)."""
-    ship, hold = state["space"], state["hold"]
+    ship, hold = state.space.ship, state.space.hold
     if ship is None or hold is None:
         return
     _, _, velocity = flight.reference(world.physics, ship.position, ship.velocity)
     if length(velocity) < 1.0:
         return
     direction = normalize(velocity) if hold == "prograde" else scale(normalize(velocity), -1.0)
-    controls = state["space_controls"]
+    controls = state.space.controls
     controls.pitch, controls.yaw = flight.point_controls(ship.axes(), direction, ship.params.max_rates, HOLD_GAIN)
 
 
 def set_warp(step):
     """The time warp one step up or down WARPS, in space mode WARP_HEIGHT or more above the ground."""
-    ship = state["space"]
+    ship = state.space.ship
     if ship is None:
         return
     body = world.body_under(ship.position)
     height = space_height(ship, body)
     above = height if height is not None else length(body.relative(ship.position)) - body.radius
     if step > 0 and above < WARP_HEIGHT:
-        state["hud"].toast("Time warp from %.0f km up" % (WARP_HEIGHT / 1000.0), hud_module.WARNING)
+        state.ui.hud.toast("Time warp from %.0f km up" % (WARP_HEIGHT / 1000.0), hud_module.WARNING)
         return
-    state["warp"] = max(0, min(len(WARPS) - 1, state["warp"] + step))
+    state.space.warp = max(0, min(len(WARPS) - 1, state.space.warp + step))
 
 
 def space_readout():
@@ -199,14 +199,14 @@ def space_readout():
     flight.phase_angle), "wait" (s until the burn, at the difference of
     their rates round; inf when it never comes), "burn" (its delta-v) and
     "from" (the radius's height above the planet); else None."""
-    ship, controls = state["space"], state["space_controls"]
+    ship, controls = state.space.ship, state.space.controls
     body, position, velocity = flight.reference(world.physics, ship.position, ship.velocity)
     peri, apo = flight.orbit(body, position, velocity)
     moon = world.physics.moon
-    car = state["car"]
+    car = state.vehicle.car
     speed = length(velocity)
     readout = {"body": "moon" if body is moon else "planet", "assist": controls.assist,
-               "throttle": controls.throttle, "warp": time_warp(), "hold": state["hold"], "periapsis": peri,
+               "throttle": controls.throttle, "warp": time_warp(), "hold": state.space.hold, "periapsis": peri,
                "apoapsis": apo, "dv": hovercar.delta_v(car.params, car.fuel, car.cargo_mass), "speed": speed,
                "prograde": normalize(velocity) if speed >= 1.0 else None,
                "moon": (moon.position(world.time), moon.radius) if moon is not None else None, "transfer": None}

@@ -39,7 +39,7 @@ RESOURCE_COLOURS = {resources.FERRITE: fs.hex_colour("#F2994A"), resources.CUPRI
 
 def where():
     """(body, point planet space, unit up) of the car while driving, else the player's feet; or None."""
-    if state["driving"] and state["car"] is not None:
+    if state.vehicle.driving and state.vehicle.car is not None:
         body = spaceflight.car_body()
         point = vehicle.car_position()
     elif foot.player is not None and foot.bubble is not None:
@@ -63,7 +63,7 @@ def place_text(metres, degrees):
 
 def nearest_outpost(here):
     body = here[0]
-    found = [(along(here, o.point())[0], o) for o in state["outposts"] if o.body is body]
+    found = [(along(here, o.point())[0], o) for o in state.site.outposts if o.body is body]
     return min(found, key=lambda f: f[0]) if found else None
 
 
@@ -82,8 +82,8 @@ class Overview:
     name, icon = "Overview", "overview"
 
     def label(self):
-        weather = "storm" if state["in_storm"] else "clear"
-        temperature = state["temperature"]
+        weather = "storm" if state.storms.inside else "clear"
+        temperature = state.suit.temperature
         text = "Field slate · %s · %s" % (survival.hour_text(), weather)
         return text + (", %d °C" % round(temperature) if temperature is not None else "")
 
@@ -100,8 +100,8 @@ class Overview:
         return "%s from %s" % (fs.distance(near[0]), near[1].name)
 
     def corner(self, surface, right, top):
-        slate.credits_corner(surface, right, top, state["market"].credits,
-                             ("Survey data", fs.credits(state["survey_data"])))
+        slate.credits_corner(surface, right, top, state.economy.market.credits,
+                             ("Survey data", fs.credits(state.economy.survey_data)))
 
     def hints(self):
         return []
@@ -151,7 +151,7 @@ class Overview:
                     fs.write(layer, place_text(*along(here, target)), (right, top + height - 44.0), "small", MIST,
                              "num", "right")
             return
-        objectives = state["objectives"]
+        objectives = state.progress.objectives
         goal = objectives.current()
         fs.label(layer, "Objective %d / %d" % (min(objectives.index + 1, len(objectives.goals)),
                                                len(objectives.goals)), (x, top + 36.0), HOLO)
@@ -172,14 +172,14 @@ class Overview:
         pane(surface, left, top, width, height)
         x = left + 26.0
         fs.label(layer, "Suit", (x, top + 36.0))
-        params, s = state["suit_params"], state["suit"]
+        params, s = state.suit.params, state.suit.state
         reserve = max(0.0, min(1.0, s.reserve / params.reserve))
         colour = MINT if reserve >= 0.995 else HOLO if reserve >= 0.5 else AMBER if reserve >= 0.2 else CORAL
         cx, cy = x + 44.0, top + 112.0
         fs.ring(mesh, cx, cy, 40.0, reserve, colour, 4.0)
         fs.write(layer, "%d" % round(100.0 * reserve), (cx, cy), "lead", ICE, "num", "center")
         tx = cx + 64.0
-        temperature = state["temperature"]
+        temperature = state.suit.temperature
         if temperature is not None:
             fs.write(layer, "%d °C" % round(temperature), (tx, cy - 26.0), 24, ICE, "num")
         fs.write(layer, "Comfort %d to %d °C" % (round(params.cold_limit), round(params.hot_limit)), (tx, cy + 4.0),
@@ -191,11 +191,11 @@ class Overview:
         layer, mesh = surface.layer, surface.mesh
         pane(surface, left, top, width, height)
         x, right = left + 26.0, left + width - 26.0
-        car = state["car"]
+        car = state.vehicle.car
         fs.label(layer, "Hover car", (x, top + 34.0))
         if car is None:
             return
-        if state["driving"]:
+        if state.vehicle.driving:
             fs.write(layer, "driving", (right, top + 34.0), "small", MIST, "num", "right")
         elif here is not None and spaceflight.car_body() is here[0]:
             fs.write(layer, place_text(*along(here, vehicle.car_position())), (right, top + 34.0), "small", MIST,
@@ -272,8 +272,8 @@ def coming():
     found = []
     storm, now = world.storm, world.time
     if storm is not None and now < storm.end:
-        closed = sorted(state["storm_closed"])
-        if state["in_storm"]:
+        closed = sorted(state.storms.closed)
+        if state.storms.inside:
             text = "You are in it; contract deadlines are held"
         elif now < storm.start:
             text = "Starts in %s, moving %d m/s" % (minutes(storm.start - now), round(storm.speed))
@@ -282,7 +282,7 @@ def coming():
         if closed:
             text += "; pads closed at %s" % ", ".join(closed)
         found.append(("Storm", CORAL, text))
-    shower = state["shower"]
+    shower = state.showers.shower
     if shower is not None:
         if shower.start > now:
             found.append(("Meteors", AMBER, "Next shower in about %s" % minutes(shower.start - now)))
@@ -292,13 +292,13 @@ def coming():
 
 
 def show_map():
-    state["slate"].open("Map")
+    state.ui.slate.open("Map")
 
 
 def set_waypoint(point):
     body = world.body_under(point)
-    state["waypoint"] = (body, normalize(sub(point, body.centre())))
-    state["hud"].toast("Waypoint set")
+    state.progress.waypoint = (body, normalize(sub(point, body.centre())))
+    state.ui.hud.toast("Waypoint set")
 
 
 # ── Log ────────────────────────────────────────────────────────────────────
@@ -343,7 +343,7 @@ class Log:
         side = 0.33 * width
         main = width - side - GAP
         pane(surface, left, top, main, height)
-        entries = state["log"].shown(LOG_FILTERS[self.filter][1])
+        entries = state.progress.log.shown(LOG_FILTERS[self.filter][1])
         x, right = left + 26.0, left + main - 26.0
         line = fs.tint(ICE, 0.08, fs.ON_SLATE)
         rows = int((height - 30.0) // 45.0)
@@ -360,14 +360,14 @@ class Log:
         if not entries:
             fs.write(layer, "Nothing yet.", (x, top + 34.0), "body", MIST)
         sx = left + main + GAP
-        ledger = state["ledger"]
+        ledger = state.economy.ledger
         so_far = 196.0
         pane(surface, sx, top, side, so_far)
         x, right = sx + 26.0, sx + side - 26.0
         fs.label(layer, "So far", (x, top + 30.0))
         cells = walking.game_numbers()["cells"]
         rows_ = (("Earned", fs.credits(ledger.earned), MINT), ("Spent", fs.credits(ledger.spent), CORAL),
-                 ("Contracts", "%d done · %d failed" % (state["contracts_done"], state["contracts_failed"]), ICE),
+                 ("Contracts", "%d done · %d failed" % (state.contracts.done, state.contracts.failed), ICE),
                  ("Surveyed", "%s km²" % fs.grouped(cells * CELL * CELL / 1e6, 2), ICE))
         for k, (name, value, colour) in enumerate(rows_):
             row(surface, x, right, top + 62.0 + 34.0 * k, name, value, colour)
@@ -391,7 +391,7 @@ def survival_day():
 
 def log_toast(text, colour, detail, kind):
     """A toast written into the log, at the day's time."""
-    state["log"].add(survival_day(), survival.hour_text(), text, detail or "", colour, kind)
+    state.progress.log.add(survival_day(), survival.hour_text(), text, detail or "", colour, kind)
 
 
 # ── Saves ──────────────────────────────────────────────────────────────────
@@ -405,7 +405,7 @@ def save_line(data):
     saved = time.strftime("%d %b %H:%M", time.localtime(data.get("saved_at", 0.0)))
     return "day %d %02d:%02d · %s · goals %d/%d · saved %s" % (
         clock.day(t) + 1, int(hour) % 24, int(hour * 60.0) % 60, fs.credits(credits), game.get("objective", 0),
-        len(state["objectives"].goals), saved)
+        len(state.progress.objectives.goals), saved)
 
 
 def save_where(data):
@@ -432,7 +432,7 @@ def saves_section(title, button, note):
     def draw(surface, left, top, width, height):
         layer = surface.layer
         fs.write(layer, title, (left, top + 14.0), 24, ICE, "display")
-        data = state["last_save"]
+        data = state.session.last_save
         fs.label(layer, "1 save" if data is not None else "No save yet", (left + width, top + 20.0), MIST, "right")
         if data is not None:
             save_card(surface, left, top + 52.0, width, data, button)
@@ -441,5 +441,5 @@ def saves_section(title, button, note):
 
 
 def autosave_note():
-    data = state["last_save"]
+    data = state.session.last_save
     return save.describe(data) if data is not None else "No save yet"

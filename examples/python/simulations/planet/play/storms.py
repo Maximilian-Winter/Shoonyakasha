@@ -52,35 +52,35 @@ def update_storms(dt):
     here = showers.shower_here()
     if here is None:
         return
-    storm, hud = world.storm, state["hud"]
+    storm, hud = world.storm, state.ui.hud
     if storm is None or world.time >= storm.end:
-        for name in sorted(state["storm_closed"]):
+        for name in sorted(state.storms.closed):
             hud.toast("The storm has passed %s: its pads are open" % name, GOOD_TOAST)
-        if state["in_storm"]:
+        if state.storms.inside:
             hud.toast("Out of the storm", GOOD_TOAST)
-        state["storm_warned"], state["storm_closed"], state["in_storm"] = set(), set(), False
+        state.storms.warned, state.storms.closed, state.storms.inside = set(), set(), False
         if args.check:
             world.storm = None
             return
-        world.storm = events.schedule_storm(world.time, state["storm_rng"], here, planet.radius, downwind(here))
+        world.storm = events.schedule_storm(world.time, state.storms.rng, here, planet.radius, downwind(here))
         storm = world.storm
-    for o in [o for o in state["outposts"] if o.body is planet]:
-        if o.name not in state["storm_warned"] and (closed(o) or storm.at(o.direction, world.time + STORM_WARNING) > 0.0):
-            state["storm_warned"].add(o.name)
+    for o in [o for o in state.site.outposts if o.body is planet]:
+        if o.name not in state.storms.warned and (closed(o) or storm.at(o.direction, world.time + STORM_WARNING) > 0.0):
+            state.storms.warned.add(o.name)
             hud.toast("Storm approaching %s: landing pads closed" % o.name, hud_module.WARNING)
         if closed(o):
-            state["storm_closed"].add(o.name)
-        elif o.name in state["storm_closed"]:
-            state["storm_closed"].discard(o.name)
-            state["storm_warned"].discard(o.name)
+            state.storms.closed.add(o.name)
+        elif o.name in state.storms.closed:
+            state.storms.closed.discard(o.name)
+            state.storms.warned.discard(o.name)
             hud.toast("The storm has passed %s: its pads are open" % o.name, GOOD_TOAST)
     inside = storm.at(here, world.time) > 0.0
-    if inside != state["in_storm"]:
+    if inside != state.storms.inside:
         hud.toast("In a storm: contracts' deadlines held" if inside else "Out of the storm",
                   hud_module.WARNING if inside else GOOD_TOAST)
-        state["in_storm"] = inside
+        state.storms.inside = inside
     if inside:
-        for c in state["contracts"]:
+        for c in state.contracts.active:
             c.paused += dt
 
 
@@ -89,7 +89,7 @@ def buffet_car(dt):
     BUFFET a second per m/s beyond, times noise of the world's clock
     (wind.noise3 at BUFFET_RATE) and the share of the way it is from its
     cushion to hovercar.AIR_HEIGHT, so not on its cushion."""
-    car = state["car"]
+    car = state.vehicle.car
     if car is None or car.height is None:
         return
     speed = length(world.wind_at(spaceflight.car_body(), car.position, car.height))
@@ -106,7 +106,7 @@ def draw_rain(camera, basis):
     across around it, each RAIN_STREAK seconds of its fall long, in
     RAIN_COLOUR, as many and as bright as how much of the storm is there
     (viewmodel.Glows)."""
-    glows = state["rain_glows"]
+    glows = state.ui.rain_glows
     glows.begin(basis)
     storm = world.storm
     body = world.body_under(camera)
@@ -128,4 +128,4 @@ def draw_rain(camera, basis):
             at = add(add(scale(east, x), scale(north, y)), scale(up, z))
             glows.streak(at, add(at, scale(fall, -RAIN_STREAK)), RAIN_WIDTH, scale(RAIN_COLOUR, s))
     glows.end()
-    state["rain_drawn"] = count
+    state.storms.rain_drawn = count

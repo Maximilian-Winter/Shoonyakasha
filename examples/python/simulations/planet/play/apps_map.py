@@ -121,7 +121,7 @@ class Map:
             front.end()
             return
         body, point, up = here
-        grid = state["map"].grid(body, up)
+        grid = state.ui.map.grid(body, up)
         at = grid.index(up)
         if at is None:
             self.image_visible(False)
@@ -214,20 +214,20 @@ class Map:
     def draw_contracts(self, surface, left, top, width, height):
         here = economy.at_outpost()
         offers = contracting.contract_offers(here)
-        names = ["Active %d / %d" % (len(state["contracts"]), contracts.MAX_ACTIVE),
+        names = ["Active %d / %d" % (len(state.contracts.active), contracts.MAX_ACTIVE),
                  "Offers at %s %d" % (here.name, len(offers)) if here is not None else "Offers"]
         tabs(surface, left, top, names, self.side, lambda k: setattr(self, "side", k), align="left", size="body")
         y = top + 56.0
-        room = top + height - y - (fs.BUTTON_HEIGHT + 16.0 if state["waypoint"] is not None else 0.0)
+        room = top + height - y - (fs.BUTTON_HEIGHT + 16.0 if state.progress.waypoint is not None else 0.0)
         if self.side == 0:
             draw_active(surface, left, y, width, room)
         else:
             draw_offers(surface, here, offers, left, y, width, room)
-        if state["waypoint"] is not None:
+        if state.progress.waypoint is not None:
             text = "Clear waypoint"
             bw = fs.button_width(text)
             surface.button(left + width - bw, top + height - fs.BUTTON_HEIGHT, bw, text,
-                           lambda: state.update(waypoint=None))
+                           lambda: setattr(state.progress, "waypoint", None))
 
 
 class Contracts:
@@ -237,23 +237,23 @@ class Contracts:
         here = economy.at_outpost()
         if here is None:
             return "Contracts · not on a pad"
-        return "Contracts · at %s · rep %+d" % (here.name, round(state["reputation"].get(here.name, 0.0)))
+        return "Contracts · at %s · rep %+d" % (here.name, round(state.contracts.reputation.get(here.name, 0.0)))
 
     def title(self):
         return "Contracts"
 
     def corner(self, surface, right, top):
-        slate.credits_corner(surface, right, top, state["market"].credits)
+        slate.credits_corner(surface, right, top, state.economy.market.credits)
 
     def hints(self):
         return []
 
     def note(self):
-        return apps.sentence(state["contract_note"]) or "Storms hold your deadlines while you're inside them."
+        return apps.sentence(state.contracts.note) or "Storms hold your deadlines while you're inside them."
 
     def draw(self, surface, left, top, width, height):
         half = 0.5 * (width - apps.GAP)
-        fs.label(surface.layer, "Active %d / %d" % (len(state["contracts"]), contracts.MAX_ACTIVE), (left, top + 10.0))
+        fs.label(surface.layer, "Active %d / %d" % (len(state.contracts.active), contracts.MAX_ACTIVE), (left, top + 10.0))
         draw_active(surface, left, top + 30.0, half, height - 30.0)
         here = economy.at_outpost()
         x = left + half + apps.GAP
@@ -263,7 +263,7 @@ class Contracts:
 
 
 def draw_active(surface, left, top, width, height):
-    active = sorted(state["contracts"], key=lambda c: c.id != state["pinned"])
+    active = sorted(state.contracts.active, key=lambda c: c.id != state.contracts.pinned)
     if not active:
         fs.write(surface.layer, "No contracts yet: take one on an outpost's pad.", (left, top + 16.0), "body", MIST)
     y = top
@@ -308,7 +308,7 @@ def tabs(surface, x, top, names, chosen, choose, align="right", size="body"):
 def contract_card(surface, c, left, top, width):
     """The card of the active contract `c`; returns its height."""
     layer, mesh = surface.layer, surface.mesh
-    pinned = c.id == state["pinned"]
+    pinned = c.id == state.contracts.pinned
     height = 160.0 if c.kind in ("delivery", "survey", "courier") else 136.0
     fs.pane(mesh, left, top, width, height, fs.RADIUS, fs.tint(ICE, 0.05 if pinned else 0.03, fs.ON_SLATE),
             fs.tint(HOLO, 0.3, fs.ON_SLATE) if pinned else fs.PANE_EDGE)
@@ -398,7 +398,7 @@ def clamp(p, box, margin):
 
 def waypoint_cell(grid, body, where):
     """The waypoint at the cell coordinates `where` of `body`'s grid."""
-    state["waypoint"] = (body, grid.direction(where[0], where[1]))
+    state.progress.waypoint = (body, grid.direction(where[0], where[1]))
 
 
 def waypoint_offset(east, north):
@@ -407,7 +407,7 @@ def waypoint_offset(east, north):
     if here is None:
         return False
     body, _, up = here
-    grid = state["map"].grid(body, up)
+    grid = state.ui.map.grid(body, up)
     at = grid.index(up)
     if at is None:
         return False

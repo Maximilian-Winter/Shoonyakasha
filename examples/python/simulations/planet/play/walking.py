@@ -51,55 +51,55 @@ def maybe_spawn():
     the ground under the camera are known: at the start beside the ship,
     or LOAD_LIFT above the ground where a loaded save had it; not while the
     start's menu is up or in the car."""
-    if (foot.player is not None or planet.tree is None or world.site_height is None or state["starting"]
-            or state["driving"]):
+    if (foot.player is not None or planet.tree is None or world.site_height is None or state.session.starting
+            or state.vehicle.driving):
         return
-    if state["ship"] is None:
+    if state.site.ship is None:
         position, _, _, north = site.ship_pose()
         vehicle.make_car(position, north)
-        if state["loading"] is None:
-            state["position"] = add(site.spawn_point(), scale(state["ship"][2], 2.0))
-            state["forward"] = state["ship"][3]
+        if state.session.loading is None:
+            state.view.position = add(site.spawn_point(), scale(state.site.ship[2], 2.0))
+            state.view.forward = state.site.ship[3]
         world.ground = None
         return
-    if world.ground is None or world.height_above_ground(state["position"]) > Bubble.RADIUS:
+    if world.ground is None or world.height_above_ground(state.view.position) > Bubble.RADIUS:
         return
-    loading = state["loading"]
-    if loading is not None and world.body_under(state["position"]).name != loading["on"]:
+    loading = state.session.loading
+    if loading is not None and world.body_under(state.view.position).name != loading["on"]:
         return
-    bubble = foot.ensure_bubble(state["position"])
-    up = normalize(bubble.body.relative(state["position"]))
+    bubble = foot.ensure_bubble(state.view.position)
+    up = normalize(bubble.body.relative(state.view.position))
     lift = SPAWN_LIFT if loading is None else LOAD_LIFT
-    feet = add(bubble.body.centre(), scale(up, bubble.body.radius + world.surface_height(state["position"]) + lift))
-    foot.spawn(feet, state["forward"])
+    feet = add(bubble.body.centre(), scale(up, bubble.body.radius + world.surface_height(state.view.position) + lift))
+    foot.spawn(feet, state.view.forward)
     place_eye()
     if loading is None:
         place_crates()
-        goal = state["objectives"].current()
-        state["hud"].toast("F1 shows the controls")
-        state["hud"].toast("%s. %s" % (goal.title, goal.hint))
+        goal = state.progress.objectives.current()
+        state.ui.hud.toast("F1 shows the controls")
+        state.ui.hud.toast("%s. %s" % (goal.title, goal.hint))
         print("[walker] on foot at Base", flush=True)
     else:
         foot.player.pitch = loading["pitch"]
-        state["loading"] = None
-        state["hud"].toast(loading.get("toast", "Game loaded"), GOOD_TOAST)
+        state.session.loading = None
+        state.ui.hud.toast(loading.get("toast", "Game loaded"), GOOD_TOAST)
         print("[walker] on foot where the save had the player", flush=True)
 
 
 def place_eye():
     eye = foot.place_eye()
     if eye is not None:
-        state["position"] = eye
-        state["forward"] = foot.view[2]
+        state.view.position = eye
+        state.view.forward = foot.view[2]
 
 
 def view_basis():
-    if state["driving"] and state["chase_basis"] is not None:
-        return state["chase_basis"]
+    if state.vehicle.driving and state.view.chase_basis is not None:
+        return state.view.chase_basis
     if foot.view is not None:
         return foot.view
-    forward = normalize(state["forward"])
-    up = normalize(world.body_under(state["position"]).relative(state["position"]))
+    forward = normalize(state.view.forward)
+    up = normalize(world.body_under(state.view.position).relative(state.view.position))
     right = normalize(cross(forward, up))
     return right, cross(right, forward), forward
 
@@ -110,26 +110,26 @@ def capture_mouse():
     is captured, the mouse buttons held then are ignored until let go
     (`ignore_held_buttons`)."""
     wanted = hud_shown()
-    if wanted != state["captured"]:
+    if wanted != state.view.captured:
         engine.input.set_mouse_captured(wanted)
-        state["captured"] = wanted
-        state["ignore_buttons"] = wanted
+        state.view.captured = wanted
+        state.view.ignore_buttons = wanted
     elif wanted and not engine.input.is_mouse_captured() and engine.input.is_mouse_button_down(keys.MOUSE_LEFT):
         engine.input.set_mouse_captured(True)
-        state["ignore_buttons"] = True
+        state.view.ignore_buttons = True
 
 
 def ignore_held_buttons():
     """While the mouse buttons held when the mouse was captured are still
     held, the gun's controls they give cleared: the click that closed a
     menu or captured the mouse does not grab or punt."""
-    if not state["ignore_buttons"]:
+    if not state.view.ignore_buttons:
         return
     if engine.input.is_mouse_button_down(keys.MOUSE_LEFT) or engine.input.is_mouse_button_down(keys.MOUSE_RIGHT):
         controls = foot.gun_controls
         controls.grab = controls.punt = controls.punt_held = False
     else:
-        state["ignore_buttons"] = False
+        state.view.ignore_buttons = False
 
 
 def read_pad_enter():
@@ -137,9 +137,9 @@ def read_pad_enter():
     if not engine.input.is_gamepad_connected():
         return
     x = engine.input.is_gamepad_button_down(keys.GAMEPAD_X)
-    if x and not state["pad_x"]:
+    if x and not state.view.pad_x:
         vehicle.enter_car()
-    state["pad_x"] = x
+    state.view.pad_x = x
 
 
 def read_bumpers():
@@ -148,9 +148,9 @@ def read_bumpers():
         return
     held = {b for b in (keys.GAMEPAD_LEFT_BUMPER, keys.GAMEPAD_RIGHT_BUMPER)
             if engine.input.is_gamepad_button_down(b)}
-    for b in held - state["bumpers"]:
+    for b in held - state.view.bumpers:
         foot.gun_controls.distance += 1.0 if b == keys.GAMEPAD_RIGHT_BUMPER else -1.0
-    state["bumpers"] = held
+    state.view.bumpers = held
 
 
 def set_max_levels():
@@ -162,7 +162,7 @@ def set_max_levels():
 
 
 def place_viewmodel(dt, camera):
-    viewmodel, gun, player = state["viewmodel"], foot.gun, foot.player
+    viewmodel, gun, player = state.ui.viewmodel, foot.gun, foot.player
     viewmodel.show(player is not None)
     if player is None:
         return
@@ -179,18 +179,18 @@ def markers(body):
     (contract_target) on the planet, an announced shower's centre and the
     last meteorite while it lies whole on `body`, and a storm's centre from
     STORM_WARNING before its start to its end on the planet."""
-    found = [(o.name, o.point(), HOME_MARKER if o is state["home"] else OUTPOST_MARKER)
-             for o in state["outposts"] if o.body is body]
-    if state["ship"] is not None and body is planet:
-        found.append(("Ship", state["ship"][0], SHIP_MARKER))
-    waypoint = state["waypoint"]
+    found = [(o.name, o.point(), HOME_MARKER if o is state.site.home else OUTPOST_MARKER)
+             for o in state.site.outposts if o.body is body]
+    if state.site.ship is not None and body is planet:
+        found.append(("Ship", state.site.ship[0], SHIP_MARKER))
+    waypoint = state.progress.waypoint
     if waypoint is not None and waypoint[0] is body:
         found.append(("Waypoint", add(body.centre(), scale(waypoint[1], body.radius)), WAYPOINT_MARKER))
     target = contracting.contract_target(contracting.pinned_contract())
     if target is not None and body is planet:
         found.append(("Contract", target, CONTRACT_MARKER))
-    if body is showers.shower_body() and state["shower"] is not None and state["shower_warned"]:
-        found.append(("Meteors", add(body.centre(), scale(state["shower"].centre, body.radius)), METEOR_MARKER))
+    if body is showers.shower_body() and state.showers.shower is not None and state.showers.warned:
+        found.append(("Meteors", add(body.centre(), scale(state.showers.shower.centre, body.radius)), METEOR_MARKER))
     meteorite = showers.meteorite_point()
     if meteorite is not None and world.body_under(meteorite) is body:
         found.append(("Meteorite", meteorite, METEOR_MARKER))
@@ -202,24 +202,24 @@ def markers(body):
 
 def hud_shown():
     """On foot or in the car, with the slate and the System screen hidden."""
-    return ((foot.player is not None or state["driving"]) and not state["slate"].visible
-            and not state["system"].visible)
+    return ((foot.player is not None or state.vehicle.driving) and not state.ui.slate.visible
+            and not state.ui.system.visible)
 
 
 def update_hud(dt):
     """The HUD while `hud_shown`, with `markers` on the compass: on foot,
     in the car or in its space mode (hud.Frame's modes)."""
-    hud, player = state["hud"], foot.player
+    hud, player = state.ui.hud, foot.player
     shown = hud_shown()
     hud.show(shown)
     if not shown:
         return
     pad = engine.input.is_gamepad_connected()
-    common = {"view": view_basis(), "eye": state["position"], "dt": dt, "hour": survival.hour_text(),
+    common = {"view": view_basis(), "eye": state.view.position, "dt": dt, "hour": survival.hour_text(),
               "flash": showers.flash_tint(), "fov": world.fov}
-    if state["driving"]:
-        car, body = state["car"], spaceflight.car_body()
-        if state["space"] is not None:
+    if state.vehicle.driving:
+        car, body = state.vehicle.car, spaceflight.car_body()
+        if state.space.ship is not None:
             readout = spaceflight.space_readout()
             readout["dv_full"] = hovercar.delta_v(car.params, car.params.fuel_capacity, car.cargo_mass)
             hints = hud_module.drive_hints(pad, space=True, hover_back=HOVER_BACK)
@@ -228,7 +228,7 @@ def update_hud(dt):
             return
         up = car.up()
         speed = length(sub(car.velocity, scale(up, dot(car.velocity, up))))
-        burn = car.burn_rate(state["car_controls"])
+        burn = car.burn_rate(state.vehicle.controls)
         hints = hud_module.drive_hints(pad, car.can_leave(), car.height is not None and car.height >= SPACE_HEIGHT,
                                        space_height=SPACE_HEIGHT)
         hud.update(hud_module.Frame(
@@ -244,7 +244,7 @@ def update_hud(dt):
     gun = foot.gun
     held = gun is not None and gun.held is not None
     prompt, more = reach_prompt(pad)
-    suit_state, params, temperature = "ok", state["suit_params"], state["temperature"]
+    suit_state, params, temperature = "ok", state.suit.params, state.suit.temperature
     if temperature is not None and temperature < params.cold_limit:
         suit_state = "cold"
     elif temperature is not None and temperature > params.hot_limit:
@@ -253,8 +253,8 @@ def update_hud(dt):
         "foot", body=body, targets=markers(body), speed=length(sub(v, scale(up, dot(v, up)))),
         hints=[(("Esc",), "Menu"), (("M",), "Map")], status=gun.status if gun is not None else "idle", held=held,
         charge=gun.charge if held else 0.0, hold_distance=gun.hold_distance if held else None, prompt=prompt,
-        prompt_hints=more, height=world.height_above_ground(state["position"]) - player.eye_height,
-        jet=player.jet_fuel, reserve=state["suit"].reserve / params.reserve, health=state["suit"].health,
+        prompt_hints=more, height=world.height_above_ground(state.view.position) - player.eye_height,
+        jet=player.jet_fuel, reserve=state.suit.state.reserve / params.reserve, health=state.suit.state.health,
         temperature=temperature, suit_state=suit_state, tint=survival.suit_effects()[0], **common))
 
 
@@ -280,13 +280,13 @@ def reach_prompt(pad):
         else:
             prompt = hud_module.Prompt(grab, "Grab", name, detail, colour)
         more.append(((punt,), "Punt"))
-    spot = state["use_spot"]
+    spot = state.exploring.use_spot
     if spot is not None:
         poi, k, _ = spot
         hold = pois.SPOTS[poi.kind][k][2]
         word = pois.USE_WORDS[poi.kind]
         if prompt is None:
-            progress = state["use_progress"] / hold if hold > 0.0 and state["use_progress"] > 0.0 else None
+            progress = state.exploring.use_progress / hold if hold > 0.0 and state.exploring.use_progress > 0.0 else None
             prompt = hud_module.Prompt("E", word, poi.name, "hold %.0f s" % hold if hold > 0.0 else "",
                                        hud_module.DIM, progress)
         else:
@@ -309,14 +309,14 @@ def target_text(target):
     mass = "%.0f kg" % target.mass
     prop = foot.props.find(target.body)
     if prop is not None:
-        if id(prop) in state["pods"]:
+        if id(prop) in state.exploring.pods:
             return "Cargo pod", mass, hud_module.DIM
-        if id(prop) in state["couriers"]:
+        if id(prop) in state.contracts.couriers:
             return "Courier crate", mass, hud_module.DIM
         if prop.kind == "crate":
             return "Crate", mass, hud_module.DIM
         body, position, _ = foot.prop_state(prop)
-        seen = state["seen"].get(id(prop), (body.name, normalize(position)))
+        seen = state.economy.seen.get(id(prop), (body.name, normalize(position)))
         kind, grade, resource = prop.kind, prop.grade, prop.resource
     else:
         key = foot.rocks.bodies.get(target.body) if foot.rocks is not None else None
@@ -332,7 +332,7 @@ def target_text(target):
     detail = "%s · %.2f" % (mass, grade)
     item = {"body": seen[0], "direction": seen[1], "mass": target.mass, "grade": grade, "resource": resource}
     point = add(body.centre(), position)
-    open_ = [o for o in state["outposts"] if o.body is body and not storms.closed(o)]
+    open_ = [o for o in state.site.outposts if o.body is body and not storms.closed(o)]
     if open_:
         outpost = min(open_, key=lambda o: length(sub(o.point(), point)))
         detail += " · ~%s cr" % format(int(round(price(outpost, item, world.time) * target.mass)), ",")
@@ -345,28 +345,28 @@ def update_map(dt):
     impacts waiting for their ground), the waypoint
     cleared once reached, and the minimap and full map drawn on foot or in
     the car while the menu is hidden."""
-    view, player = state["map_view"], foot.player
-    shown = (player is not None or state["driving"]) and not state["system"].visible and not state["slate"].visible
+    view, player = state.ui.map_view, foot.player
+    shown = (player is not None or state.vehicle.driving) and not state.ui.system.visible and not state.ui.slate.visible
     view.show(shown)
-    if player is None and not state["driving"]:
+    if player is None and not state.vehicle.driving:
         return
-    if state["driving"]:
-        body, feet = spaceflight.car_body(), state["car"].position
+    if state.vehicle.driving:
+        body, feet = spaceflight.car_body(), state.vehicle.car.position
     else:
         body = foot.bubble.body
         feet = foot.bubble.body_relative(player.feet())
-    explored = state["map"]
+    explored = state.ui.map
     explored.probe(body, feet, EXTRA_PROBES,
                    yield_to=(foot.bubble is not None and bool(foot.props.needs_ground(foot.bubble)))
-                   or bool(state["pois"].queue) or showers.shower_waiting())
+                   or bool(state.exploring.pois.queue) or showers.shower_waiting())
     exploring.probe_pois()
     up = normalize(feet)
-    waypoint = state["waypoint"]
+    waypoint = state.progress.waypoint
     if waypoint is not None and waypoint[0] is body and body.radius * math.acos(
             max(-1.0, min(1.0, dot(up, waypoint[1])))) <= WAYPOINT_REACH:
-        state["waypoint"] = None
-        state["waypoints"] += 1
-        state["hud"].toast("Waypoint reached")
+        state.progress.waypoint = None
+        state.progress.waypoints += 1
+        state.ui.hud.toast("Waypoint reached")
     if not shown:
         return
     grid = explored.grid(body, up)
@@ -377,7 +377,7 @@ def update_map(dt):
         where = grid.index(normalize(sub(position, body.centre())))
         if where is not None:
             cells.append((name, where, colour))
-    view.update(dt, grid, at, heading, cells, mini=not state["driving"])
+    view.update(dt, grid, at, heading, cells, mini=not state.vehicle.driving)
 
 
 def place_crates():
@@ -425,7 +425,7 @@ def ore_rocks():
     each loose ore rock, its speed infinite until it has settled (so it
     does not sell in the air); each first seen now noted with its body's
     name and its direction."""
-    seen, found = state["seen"], []
+    seen, found = state.economy.seen, []
     for prop in foot.props.rocks:
         if prop.grade <= 0.0:
             continue
@@ -433,7 +433,7 @@ def ore_rocks():
         if id(prop) not in seen:
             seen[id(prop)] = (body.name, normalize(position))
             if prop.key is None:
-                state["ore_chunks"] += 1
+                state.progress.ore_chunks += 1
         found.append((prop, body, position, length(velocity) if settled(prop) else math.inf, seen[id(prop)]))
     present = {id(p) for p in foot.props.rocks}
     for key in [k for k in seen if k not in present]:
@@ -455,27 +455,27 @@ def update_game():
     delivery contract that wants it there), the pods sold and the contracts' crates
     delivered, the objectives moved on, the objective card shown (the
     pinned contract's in place of the objective)."""
-    hud, player = state["hud"], foot.player
-    if state["market_record"] is None:
-        state["ledger"].watch(state["market"].credits)
+    hud, player = state.ui.hud, foot.player
+    if state.session.market_record is None:
+        state.economy.ledger.watch(state.economy.market.credits)
     if player is None:
         return
     feet = foot.bubble.body_relative(player.feet())
     ore = ore_rocks()
-    if not state["ore_seen"] and (ore_seen_near(feet) or any(length(sub(p[2], feet)) <= ORE_SEEN_RANGE
+    if not state.progress.ore_seen and (ore_seen_near(feet) or any(length(sub(p[2], feet)) <= ORE_SEEN_RANGE
                                                                for p in ore)):
-        state["ore_seen"] = 1
+        state.progress.ore_seen = 1
     held = foot.props.find(foot.gun.held) if foot.gun is not None and foot.gun.held is not None else None
-    for outpost, prop, item in sale_items(ore, [o for o in state["outposts"] if not storms.closed(o)], held):
+    for outpost, prop, item in sale_items(ore, [o for o in state.site.outposts if not storms.closed(o)], held):
         if contracting.deliver(outpost, item):
             foot.props.remove(foot.bubble, prop, release=False)
             continue
         credits, supplies = sale(outpost, [item], world.time)
         outpost.supply.update(supplies)
-        state["market"].credits += credits
-        state["earned"] += credits
-        state["sold_kg"] += item["mass"]
-        state["ledger"].sold(item["resource"], item["mass"])
+        state.economy.market.credits += credits
+        state.economy.earned += credits
+        state.economy.sold_kg += item["mass"]
+        state.economy.ledger.sold(item["resource"], item["mass"])
         foot.props.remove(foot.bubble, prop, release=False)
         hud.toast("Sold %.0f kg of %s (grade %.2f) at %s: +%s cr"
                   % (item["mass"], resources.name(item["resource"]).lower(), item["grade"], outpost.name,
@@ -483,7 +483,7 @@ def update_game():
     exploring.sell_pods(held)
     contracting.deliver_couriers(held)
     snapshot = game_numbers()
-    objectives = state["objectives"]
+    objectives = state.progress.objectives
     for goal in objectives.update(snapshot):
         hud.toast("Objective complete: %s" % goal.title, GOOD_TOAST)
         upcoming = objectives.current()
@@ -507,9 +507,9 @@ def update_game():
 
 
 def game_numbers():
-    return {"cells": sum(grid.measured for grid in state["map"].grids.values()),
-            "waypoints": state["waypoints"], "ore_seen": state["ore_seen"], "ore_chunks": state["ore_chunks"],
-            "sold_kg": state["sold_kg"], "earned": state["earned"]}
+    return {"cells": sum(grid.measured for grid in state.ui.map.grids.values()),
+            "waypoints": state.progress.waypoints, "ore_seen": state.progress.ore_seen, "ore_chunks": state.progress.ore_chunks,
+            "sold_kg": state.economy.sold_kg, "earned": state.economy.earned}
 
 
 def take_capture(directory=CAPTURES):
@@ -518,21 +518,21 @@ def take_capture(directory=CAPTURES):
     os.makedirs(directory, exist_ok=True)
     path = os.path.join(directory, time.strftime("walker_%Y%m%d_%H%M%S.png"))
     if not engine.capture_screenshot(path):
-        state["hud"].toast("The screenshot failed", hud_module.WARNING)
+        state.ui.hud.toast("The screenshot failed", hud_module.WARNING)
         return None
     print("[walker] screenshot: %s" % path, flush=True)
-    state["capture_toast"] = [os.path.basename(path), CAPTURE_TOAST_FRAMES]
+    state.view.capture_toast = [os.path.basename(path), CAPTURE_TOAST_FRAMES]
     return path
 
 
 def capture_toast():
-    pending = state["capture_toast"]
+    pending = state.view.capture_toast
     if pending is None:
         return
     pending[1] -= 1
     if pending[1] <= 0:
-        state["hud"].toast("Screenshot saved: %s" % pending[0], GOOD_TOAST)
-        state["capture_toast"] = None
+        state.ui.hud.toast("Screenshot saved: %s" % pending[0], GOOD_TOAST)
+        state.view.capture_toast = None
 
 
 def screenshot(path):

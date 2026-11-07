@@ -53,7 +53,7 @@ def poi_at(poi, offset):
 
 def player_here():
     """The player's feet (or the car), planet space, on the planet; None elsewhere or without either."""
-    if state["driving"]:
+    if state.vehicle.driving:
         return vehicle.car_position() if spaceflight.car_body() is planet else None
     if foot.player is None or foot.bubble.body is not planet:
         return None
@@ -70,17 +70,17 @@ def probe_pois():
     with the world's extra probes, as the explored map does: only while
     nothing else uses them and no meteor shower's impact waits for its
     ground (shower_waiting); each with its water (PlanetWorld.water_level)."""
-    p, asked = state["pois"], state["poi_asked"]
+    p, asked = state.exploring.pois, state.exploring.asked
     if world.extra_probes and world.extra_probes != asked:
         return
     if asked is not None:
         if [probe for probe, _ in world.extra_heights] != asked:
             return
-        for poi, (_, h), (_, climate), (_, ore), (_, resource) in zip(state["poi_asking"], world.extra_heights,
+        for poi, (_, h), (_, climate), (_, ore), (_, resource) in zip(state.exploring.asking, world.extra_heights,
                                                                        world.extra_climates, world.extra_ores,
                                                                        world.extra_resources):
             p.measured(poi.key, h, climate, ore, resource, world.water_level(poi.direction))
-        state["poi_asked"], state["poi_asking"] = None, []
+        state.exploring.asked, state.exploring.asking = None, []
         world.extra_probes = []
     if showers.shower_waiting():
         return
@@ -88,7 +88,7 @@ def probe_pois():
     if batch:
         asked = [(poi.direction, planet) for poi in batch]
         world.extra_probes = asked
-        state["poi_asked"], state["poi_asking"] = asked, batch
+        state.exploring.asked, state.exploring.asking = asked, batch
 
 
 def update_pois(dt):
@@ -96,32 +96,32 @@ def update_pois(dt):
     POI_WANT_MOVE; the found ones discovered within SCAN_RANGE, or within
     SEEN_RANGE in the view's cone; their scenes and props; the use key; and
     the explored map's newly walked cells paid as survey data."""
-    explored = state["map"]
-    if state["walked_counted"] is None:
-        state["walked_counted"] = explored.walked
-    if explored.walked > state["walked_counted"]:
-        state["survey_data"] += CELL_SURVEY * (explored.walked - state["walked_counted"])
-        state["walked_counted"] = explored.walked
+    explored = state.ui.map
+    if state.exploring.walked_counted is None:
+        state.exploring.walked_counted = explored.walked
+    if explored.walked > state.exploring.walked_counted:
+        state.economy.survey_data += CELL_SURVEY * (explored.walked - state.exploring.walked_counted)
+        state.exploring.walked_counted = explored.walked
     here = player_here()
     if here is None:
         update_poi_scenes(None)
-        state["use_spot"] = None
+        state.exploring.use_spot = None
         return
-    p = state["pois"]
+    p = state.exploring.pois
     direction = normalize(planet.relative(here))
-    last = state["poi_want_at"]
+    last = state.exploring.want_at
     if last is None or planet.radius * math.acos(max(-1.0, min(1.0, dot(last, direction)))) > POI_WANT_MOVE:
         p.want(planet.index, direction, POI_REACH, planet.radius, poi_seed())
-        state["poi_want_at"] = direction
+        state.exploring.want_at = direction
     view = walking.view_basis()[2]
     for poi in p.found():
         if poi.discovered:
             continue
         d = poi_distance(poi, here)
-        towards = normalize(sub(poi_point(poi), state["position"]))
+        towards = normalize(sub(poi_point(poi), state.view.position))
         if d <= SCAN_RANGE or (d <= SEEN_RANGE and dot(towards, view) >= SEEN_COS):
             poi.discovered = True
-            state["hud"].toast("Found: %s, %s" % (poi.name, distance_text(d)), POI_MARKER, kind="finds")
+            state.ui.hud.toast("Found: %s, %s" % (poi.name, distance_text(d)), POI_MARKER, kind="finds")
     update_poi_scenes(here)
     make_poi_props(here)
     update_use(dt)
@@ -132,11 +132,11 @@ def update_poi_scenes(here):
     (pois.LAYOUTS), those beyond removed; the plants and rocks cleared
     around each (pois.CLEAR_RADIUS, PlanetWorld.set_clearings) as the set
     changes."""
-    scenes = state["poi_scenes"]
-    near = [] if here is None else [poi for poi in state["pois"].found() if poi_distance(poi, here) <= DRAW_RANGE]
+    scenes = state.exploring.scenes
+    near = [] if here is None else [poi for poi in state.exploring.pois.found() if poi_distance(poi, here) <= DRAW_RANGE]
     keys = sorted(poi.key for poi in near)
-    if keys != state["poi_cleared"]:
-        state["poi_cleared"] = keys
+    if keys != state.exploring.cleared:
+        state.exploring.cleared = keys
         nearest = sorted(near, key=lambda poi: poi_distance(poi, here))[:planet_world.MAX_CLEARINGS]
         world.set_clearings([planet_world.Clearing(planet.index, poi.direction, radius=pois.CLEAR_RADIUS[poi.kind],
                                                    edge=pois.CLEAR_EDGE,
@@ -166,7 +166,7 @@ def update_poi_scenes(here):
 
 
 def draw_poi_scenes(camera):
-    for pieces in state["poi_scenes"].values():
+    for pieces in state.exploring.scenes.values():
         for entity, point in pieces:
             engine.scene.set_position(entity, sub(point, camera))
 
@@ -178,7 +178,7 @@ def make_poi_props(here):
     bubble = foot.bubble
     if bubble is None or bubble.body is not planet:
         return
-    for poi in state["pois"].found():
+    for poi in state.exploring.pois.found():
         if poi.kind not in ("pod", "geode") or poi.done or poi.looted or poi_distance(poi, here) > PROP_RANGE:
             continue
         up = poi.direction
@@ -189,7 +189,7 @@ def make_poi_props(here):
             spot = bubble.to_bubble(poi_at(poi, (0.0, 0.5 * size + 0.3, 0.0)))
             crate = foot.props.spawn_crate(bubble, spot, quat_from_basis(east, up, scale(north, -1.0)), size,
                                            colour=colour, mass=mass)
-            state["pods"][id(crate)] = poi.key
+            state.exploring.pods[id(crate)] = poi.key
         else:
             resource = poi.resource or resources.FERRITE
             for k in range(pois.GEODE_ROCKS):
@@ -197,7 +197,7 @@ def make_poi_props(here):
                 r = pois.GEODE_SPREAD * (0.4 + 0.6 * ((k * 7) % 5) / 4.0)
                 rock = walking.ore_rock(poi_at(poi, (r * math.cos(angle), 0.6, r * math.sin(angle))),
                                 CHECK_ORE_EXTENT, pois.GEODE_GRADE, resource)
-                state["seen"][id(rock)] = (planet.name, poi.direction)
+                state.economy.seen[id(rock)] = (planet.name, poi.direction)
             poi.looted = True
         poi.done = [0]
 
@@ -209,7 +209,7 @@ def usable_spot():
         return None
     feet = foot.bubble.to_world(foot.player.feet())
     best = None
-    for poi in state["pois"].found():
+    for poi in state.exploring.pois.found():
         if poi.looted or poi.kind not in pois.SPOTS or poi_distance(poi, feet) > USE_LOOK:
             continue
         for k, (offset, reach, _) in enumerate(pois.SPOTS[poi.kind]):
@@ -224,18 +224,18 @@ def usable_spot():
 def update_use(dt):
     """The use key (E while the HUD shows, or --check's) held on the usable spot for its time
     (pois.SPOTS) uses it (use_spot); let go between uses."""
-    spot = state["use_spot"] = usable_spot()
-    held = (engine.input.is_key_down(keys.E) and walking.hud_shown()) or state["check_use"]
+    spot = state.exploring.use_spot = usable_spot()
+    held = (engine.input.is_key_down(keys.E) and walking.hud_shown()) or state.session.check_use
     if not held:
-        state["use_latch"] = False
-    if spot is None or not held or state["use_latch"]:
-        state["use_progress"] = 0.0
+        state.exploring.use_latch = False
+    if spot is None or not held or state.exploring.use_latch:
+        state.exploring.use_progress = 0.0
         return
     poi, k, _ = spot
-    state["use_progress"] += dt
-    if state["use_progress"] >= pois.SPOTS[poi.kind][k][2]:
-        state["use_progress"] = 0.0
-        state["use_latch"] = True
+    state.exploring.use_progress += dt
+    if state.exploring.use_progress >= pois.SPOTS[poi.kind][k][2]:
+        state.exploring.use_progress = 0.0
+        state.exploring.use_latch = True
         use_spot(poi, k)
 
 
@@ -246,26 +246,26 @@ def use_spot(poi, k):
     point is looted once every spot is used."""
     poi.done.append(k)
     poi.discovered = True
-    hud = state["hud"]
+    hud = state.ui.hud
     if poi.kind in ("beacon", "arch"):
         value = pois.survey_value(poi)
-        state["survey_data"] += value
+        state.economy.survey_data += value
         if poi.kind == "beacon":
-            cells = state["map"].reveal(planet, poi.direction, pois.REVEAL)
+            cells = state.ui.map.reveal(planet, poi.direction, pois.REVEAL)
             hud.toast("Beacon activated: the map within %s revealed (%d cells), survey data worth %.0f cr"
                       % (distance_text(pois.REVEAL), cells, value), GOOD_TOAST, kind="finds")
         else:
             hud.toast("Arch scanned: survey data worth %.0f cr" % value, GOOD_TOAST, kind="finds")
     else:
         part = pois.parts_for(poi, k)
-        state["parts"][part] = state["parts"].get(part, 0) + 1
+        state.economy.parts[part] = state.economy.parts.get(part, 0) + 1
         text = "%s: a %s" % (poi.name, pois.PART_NAMES[part].lower())
         if poi.kind == "rig":
             offset = pois.SPOTS["rig"][k][0]
             for n in range(pois.RIG_ROCKS):
                 rock = walking.ore_rock(poi_at(poi, (offset[0] + 0.6 * n, 1.6, offset[2])), CHECK_ORE_EXTENT,
                                 pois.RIG_GRADE, poi.resource or resources.FERRITE)
-                state["seen"][id(rock)] = (planet.name, poi.direction)
+                state.economy.seen[id(rock)] = (planet.name, poi.direction)
             text += " and %d ore rocks" % pois.RIG_ROCKS
         hud.toast(text, GOOD_TOAST, kind="finds")
     if len(poi.done) == len(pois.SPOTS[poi.kind]):
@@ -280,7 +280,7 @@ def pad_under(crate, held):
     body, position, velocity = foot.prop_state(crate)
     if not walking.settled(crate) or length(velocity) >= REST_SPEED:
         return None
-    return next((o for o in state["outposts"]
+    return next((o for o in state.site.outposts
                  if o.body is body and not storms.closed(o) and o.at(add(body.centre(), position))), None)
 
 
@@ -289,7 +289,7 @@ def sell_pods(held):
     `held`, sold for pois.POD_VALUE, its point looted; a recovery's pod
     only on its contract's destination's pad, which completes it."""
     for crate in list(foot.props.crates):
-        key = state["pods"].get(id(crate))
+        key = state.exploring.pods.get(id(crate))
         if key is None:
             continue
         outpost = pad_under(crate, held)
@@ -302,15 +302,15 @@ def sell_pods(held):
                 foot.props.remove(foot.bubble, crate, release=False)
                 contracting.complete_contract(c)
             continue
-        state["market"].credits += pois.POD_VALUE
-        state["earned"] += pois.POD_VALUE
-        state["pods_sold"] += 1
-        del state["pods"][id(crate)]
+        state.economy.market.credits += pois.POD_VALUE
+        state.economy.earned += pois.POD_VALUE
+        state.exploring.pods_sold += 1
+        del state.exploring.pods[id(crate)]
         foot.props.remove(foot.bubble, crate, release=False)
-        poi = state["pois"].pois.get(key)
+        poi = state.exploring.pois.pois.get(key)
         if poi is not None:
             poi.looted = True
-        state["hud"].toast("Cargo pod delivered to %s: +%s cr" % (outpost.name, format(int(pois.POD_VALUE), ",")),
+        state.ui.hud.toast("Cargo pod delivered to %s: +%s cr" % (outpost.name, format(int(pois.POD_VALUE), ",")),
                            GOOD_TOAST, kind="finds")
 
 
@@ -322,7 +322,7 @@ def poi_markers(body):
     if body is not planet or here is None:
         return []
     found = []
-    for poi in state["pois"].found():
+    for poi in state.exploring.pois.found():
         if poi.discovered:
             found.append((poi.name, poi_point(poi), LOOTED_MARKER if poi.looted else POI_MARKER))
         elif poi_distance(poi, here) <= POI_REACH:

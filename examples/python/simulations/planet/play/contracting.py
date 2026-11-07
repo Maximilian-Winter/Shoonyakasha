@@ -34,21 +34,21 @@ def contract_offers(outpost):
     if outpost is None or outpost.body is not planet:
         return []
     found = contracts.offers((outpost.name, outpost.direction), contract_day(), exploring.poi_seed(),
-                             [(o.name, o.direction) for o in state["outposts"] if o.body is planet], planet.radius,
-                             state["reputation"].get(outpost.name, 0.0))
-    return [c for c in found if c.id not in state["offers_taken"]]
+                             [(o.name, o.direction) for o in state.site.outposts if o.body is planet], planet.radius,
+                             state.contracts.reputation.get(outpost.name, 0.0))
+    return [c for c in found if c.id not in state.contracts.offers_taken]
 
 
 def outpost_named(name):
-    return next((o for o in state["outposts"] if o.name == name), None)
+    return next((o for o in state.site.outposts if o.name == name), None)
 
 
 def active_contract(contract_id):
-    return next((c for c in state["contracts"] if c.id == contract_id), None)
+    return next((c for c in state.contracts.active if c.id == contract_id), None)
 
 
 def pinned_contract():
-    return active_contract(state["pinned"])
+    return active_contract(state.contracts.pinned)
 
 
 def pod_key(c):
@@ -59,24 +59,24 @@ def pod_key(c):
 def place_pod(c, done=False):
     """A recovery's pod as a point of interest at its target, of the pod's kind wherever it is."""
     poi = pois.Poi(pod_key(c), tuple(c.target), 0.0, fixed_kind="pod", done=[0] if done else [])
-    state["pois"].place(poi)
+    state.exploring.pois.place(poi)
 
 
 def crate_contract(crate):
     """The active contract a crate prop belongs to (a courier's crate or a recovery's pod), or None."""
-    contract_id = state["couriers"].get(id(crate))
+    contract_id = state.contracts.couriers.get(id(crate))
     if contract_id is not None:
         return active_contract(contract_id)
-    key = state["pods"].get(id(crate))
+    key = state.exploring.pods.get(id(crate))
     if key is None:
         return None
-    return next((c for c in state["contracts"] if c.kind == "recovery" and pod_key(c) == key), None)
+    return next((c for c in state.contracts.active if c.kind == "recovery" and pod_key(c) == key), None)
 
 
 def forget_crate(crate):
-    state["couriers"].pop(id(crate), None)
-    state["crate_velocity"].pop(id(crate), None)
-    state["pods"].pop(id(crate), None)
+    state.contracts.couriers.pop(id(crate), None)
+    state.contracts.crate_velocity.pop(id(crate), None)
+    state.exploring.pods.pop(id(crate), None)
 
 
 def crate_item(c, mass, volume):
@@ -120,7 +120,7 @@ def contract_target(c):
         return None
     if c.kind == "recovery":
         crate = next((p for p in foot.props.crates if crate_contract(p) is c), None)
-        in_hold = state["car"] is not None and any(i.get("contract") == c.id for i in state["car"].cargo)
+        in_hold = state.vehicle.car is not None and any(i.get("contract") == c.id for i in state.vehicle.car.cargo)
         moved = False
         if crate is not None:
             body, position, _ = foot.prop_state(crate)
@@ -139,8 +139,8 @@ def poi_distance_to(direction, point):
 
 
 def contract_note(text, colour=GOOD_TOAST):
-    state["contract_note"] = text
-    state["hud"].toast(text[0].upper() + text[1:], colour, kind="contracts")
+    state.contracts.note = text
+    state.ui.hud.toast(text[0].upper() + text[1:], colour, kind="contracts")
 
 
 def accept_contract(c):
@@ -156,17 +156,17 @@ def accept_contract(c):
     if storms.closed(outpost):
         contract_note(storms.closed_note(outpost), hud_module.WARNING)
         return False
-    if len(state["contracts"]) >= contracts.MAX_ACTIVE:
+    if len(state.contracts.active) >= contracts.MAX_ACTIVE:
         contract_note("at most %d contracts at once" % contracts.MAX_ACTIVE, hud_module.WARNING)
         return False
     if c.kind == "courier" and not give_courier_crate(c, outpost):
         contract_note("no room for the crate: bring the car onto the pad, or yourself", hud_module.WARNING)
         return False
     c.state = "active"
-    state["contracts"].append(c)
-    state["offers_taken"].add(c.id)
-    if state["pinned"] is None:
-        state["pinned"] = c.id
+    state.contracts.active.append(c)
+    state.contracts.offers_taken.add(c.id)
+    if state.contracts.pinned is None:
+        state.contracts.pinned = c.id
     if c.kind == "recovery":
         place_pod(c)
     contract_note("accepted: %s" % contracts.task(c))
@@ -176,13 +176,13 @@ def accept_contract(c):
 def give_courier_crate(c, outpost):
     """A courier's crate into the car's hold when the car is on `outpost`'s
     pad and it fits, else 2 m ahead of the player on foot. Whether it was."""
-    car = state["car"]
+    car = state.vehicle.car
     volume = contracts.COURIER_SIZE ** 3
     if economy.car_outpost() is outpost and car.can_take(contracts.COURIER_MASS, None, volume):
         car.cargo.append(crate_item(c, contracts.COURIER_MASS, volume))
         return True
     player, bubble = foot.player, foot.bubble
-    if player is None or state["driving"] or bubble.body is not planet:
+    if player is None or state.vehicle.driving or bubble.body is not planet:
         return False
     up = player.up()
     forward = player.level(player.heading, up)
@@ -191,7 +191,7 @@ def give_courier_crate(c, outpost):
     crate = foot.props.spawn_crate(bubble, spot, quat_from_basis(right, up, scale(forward, -1.0)),
                                    contracts.COURIER_SIZE, colour=contracts.COURIER_COLOUR,
                                    mass=contracts.COURIER_MASS)
-    state["couriers"][id(crate)] = c.id
+    state.contracts.couriers[id(crate)] = c.id
     return True
 
 
@@ -202,30 +202,30 @@ def end_contract(c, how):
     pin moved to the next active contract."""
     crates = [p for p in foot.props.crates if crate_contract(p) is c]
     c.state = how
-    state["contracts"] = [a for a in state["contracts"] if a is not c]
-    rep = state["reputation"].get(c.origin, 0.0) + (1.0 if how == "completed" else -1.0)
-    state["reputation"][c.origin] = max(MIN_REPUTATION, rep)
+    state.contracts.active = [a for a in state.contracts.active if a is not c]
+    rep = state.contracts.reputation.get(c.origin, 0.0) + (1.0 if how == "completed" else -1.0)
+    state.contracts.reputation[c.origin] = max(MIN_REPUTATION, rep)
     if how == "completed":
-        state["contracts_done"] += 1
+        state.contracts.done += 1
     else:
-        state["contracts_failed"] += 1
+        state.contracts.failed += 1
     for crate in crates:
         forget_crate(crate)
         if foot.gun is not None and crate.body is not None and foot.gun.held == crate.body:
             foot.gun.drop()
         foot.props.remove(foot.bubble, crate, release=False)
-    if state["car"] is not None:
-        state["car"].cargo = [i for i in state["car"].cargo if i.get("contract") != c.id]
+    if state.vehicle.car is not None:
+        state.vehicle.car.cargo = [i for i in state.vehicle.car.cargo if i.get("contract") != c.id]
     if c.kind == "recovery":
-        state["pois"].pois.pop(pod_key(c), None)
-    if state["pinned"] == c.id:
-        state["pinned"] = state["contracts"][0].id if state["contracts"] else None
+        state.exploring.pois.pois.pop(pod_key(c), None)
+    if state.contracts.pinned == c.id:
+        state.contracts.pinned = state.contracts.active[0].id if state.contracts.active else None
 
 
 def complete_contract(c):
     """`c` done: its reward paid, then ended (end_contract)."""
-    state["market"].credits += c.reward
-    state["earned"] += c.reward
+    state.economy.market.credits += c.reward
+    state.economy.earned += c.reward
     end_contract(c, "completed")
     contract_note("contract complete: %s, +%s cr" % (contract_title(c), format(int(round(c.reward)), ",")))
 
@@ -236,7 +236,7 @@ def fail_contract(c, how, why):
 
 
 def pin_contract(c):
-    state["pinned"] = c.id
+    state.contracts.pinned = c.id
 
 
 def abandon_pinned():
@@ -251,14 +251,14 @@ def deliver(outpost, item):
     """An ore item at `outpost` taken by the first active delivery that
     wants it there (contracts.wants), completing it once it has its
     quantity. Whether one took it."""
-    c = next((a for a in state["contracts"] if contracts.wants(a, item, outpost.name)), None)
+    c = next((a for a in state.contracts.active if contracts.wants(a, item, outpost.name)), None)
     if c is None:
         return False
     c.delivered += item["mass"]
     if c.delivered >= c.quantity:
         complete_contract(c)
     else:
-        state["hud"].toast("Delivered %.0f kg of %s: %.0f / %.0f kg"
+        state.ui.hud.toast("Delivered %.0f kg of %s: %.0f / %.0f kg"
                            % (item["mass"], resources.name(c.resource).lower(), c.delivered, c.quantity), GOOD_TOAST,
                            kind="contracts")
     return True
@@ -267,7 +267,7 @@ def deliver(outpost, item):
 def deliver_couriers(held):
     """Each courier's crate settled on its destination's pad (pad_under) delivered."""
     for crate in list(foot.props.crates):
-        if id(crate) not in state["couriers"]:
+        if id(crate) not in state.contracts.couriers:
             continue
         c = crate_contract(crate)
         outpost = exploring.pad_under(crate, held)
@@ -287,7 +287,7 @@ def strike_crate(c, speed):
 
 def strike_hold(speed):
     """The car's bump at `speed` striking each courier's crate in its hold."""
-    car = state["car"]
+    car = state.vehicle.car
     for contract_id in [i["contract"] for i in car.cargo if "contract" in i]:
         c = active_contract(contract_id)
         if c is not None and c.kind == "courier":
@@ -297,9 +297,9 @@ def strike_hold(speed):
 def watch_couriers():
     """Each courier's crate struck by how much its velocity changed from
     last frame while its speed fell (a hit, not a throw)."""
-    seen = state["crate_velocity"]
+    seen = state.contracts.crate_velocity
     for crate in list(foot.props.crates):
-        contract_id = state["couriers"].get(id(crate))
+        contract_id = state.contracts.couriers.get(id(crate))
         if contract_id is None:
             continue
         _, _, velocity = foot.prop_state(crate)
@@ -318,23 +318,23 @@ def update_contracts(dt):
     shares measured every SURVEY_EVERY (ExploredMap.share), completing at
     contracts.SURVEY_SHARE; the couriers' crates watched; with the car on
     an open outpost's pad, the crates in its hold for there delivered."""
-    for o in state["outposts"]:
-        o.reputation = state["reputation"].get(o.name, 0.0)
-    if foot.player is None and not state["driving"]:
+    for o in state.site.outposts:
+        o.reputation = state.contracts.reputation.get(o.name, 0.0)
+    if foot.player is None and not state.vehicle.driving:
         return
-    for c in list(state["contracts"]):
+    for c in list(state.contracts.active):
         if clock.day(survival.day_time() - c.paused) > c.deadline:
             fail_contract(c, "expired", "past its deadline")
-    state["survey_in"] -= dt
-    if state["survey_in"] <= 0.0:
-        state["survey_in"] = SURVEY_EVERY
-        for c in [a for a in state["contracts"] if a.kind == "survey"]:
-            c.explored = state["map"].share(planet, c.target, contracts.SURVEY_RADIUS)
+    state.contracts.survey_in -= dt
+    if state.contracts.survey_in <= 0.0:
+        state.contracts.survey_in = SURVEY_EVERY
+        for c in [a for a in state.contracts.active if a.kind == "survey"]:
+            c.explored = state.ui.map.share(planet, c.target, contracts.SURVEY_RADIUS)
             if c.explored >= contracts.SURVEY_SHARE:
                 complete_contract(c)
     if foot.bubble is not None and foot.bubble.body is planet:
         watch_couriers()
-    car, outpost = state["car"], economy.car_outpost()
+    car, outpost = state.vehicle.car, economy.car_outpost()
     if car is not None and outpost is not None and not storms.closed(outpost) and car.speed() < 1.0:
         for item in [i for i in car.cargo if "contract" in i]:
             c = active_contract(item["contract"])

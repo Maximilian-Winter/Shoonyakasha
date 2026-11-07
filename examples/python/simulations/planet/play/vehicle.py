@@ -36,10 +36,10 @@ NET_COLOUR = (1.0, 0.72, 0.3)
 
 
 def remove_ship_body():
-    body = state["ship_body"]
+    body = state.vehicle.physics_body
     if body is not None and foot.physics.contains(body):
         foot.physics.remove(body)
-    state["ship_body"] = None
+    state.vehicle.physics_body = None
 
 
 foot.on_drop = remove_ship_body
@@ -47,21 +47,21 @@ foot.on_drop = remove_ship_body
 
 def car_position():
     """The car's centre in planet space."""
-    return add(spaceflight.car_body().centre(), state["car"].position)
+    return add(spaceflight.car_body().centre(), state.vehicle.car.position)
 
 
 def make_car(position, heading, target=hovercar.HOVER_MIN):
     """The car at `position` (planet space), its nose along `heading`, with the upgrades' parameters."""
-    state["car"] = hovercar.Car(planet.relative(position), heading, target, params=state["params"]["car"])
-    state["car_body"], state["space"] = None, None
+    state.vehicle.car = hovercar.Car(planet.relative(position), heading, target, params=state.economy.params["car"])
+    state.vehicle.body, state.space.ship = None, None
     update_ship()
 
 
 def update_ship():
     """`ship` (position, right, up, forward) from the car's pose, level."""
-    car = state["car"]
+    car = state.vehicle.car
     up = car.up()
-    state["ship"] = (car_position(), car.right(), up, car.heading)
+    state.site.ship = (car_position(), car.right(), up, car.heading)
 
 
 def car_ground(point):
@@ -87,11 +87,11 @@ def car_patch_request():
     """(body, patch): the ground patch to measure around where the car, on the body it is over,
     will be when its heights come back, ahead along its velocity by the
     probes' latency, reaching CAR_PATCH_MARGIN and its look-ahead beyond."""
-    car = state["car"]
+    car = state.vehicle.car
     up = car.up()
     v = car.velocity
     along = sub(v, scale(up, dot(v, up)))
-    ahead = world.probe_latency * state["frame_ms"] / 1000.0
+    ahead = world.probe_latency * state.view.frame_ms / 1000.0
     half = CAR_PATCH_MARGIN + length(along) * (ahead + hovercar.LOOK_AHEAD)
     centre = add(car.position, scale(along, ahead))
     body = spaceflight.car_body()
@@ -101,7 +101,7 @@ def car_patch_request():
 
 def near_car():
     """Whether the player's feet are within ENTER_REACH of the car's centre."""
-    player, car = foot.player, state["car"]
+    player, car = foot.player, state.vehicle.car
     if player is None or car is None:
         return False
     return length(sub(foot.bubble.to_world(player.feet()), car_position())) <= ENTER_REACH
@@ -109,7 +109,7 @@ def near_car():
 
 def net_frame():
     """The car's cargo net: its centre and (right, up, back) in planet space."""
-    car = state["car"]
+    car = state.vehicle.car
     right, up = car.right(), car.up()
     back = scale(car.heading, -1.0)
     r, u, b = CAR_NET_CENTRE
@@ -121,7 +121,7 @@ def in_net():
     contract's crate (`crate_contract`), in the physics or resting out of
     it, that lies in the car's net."""
     bubble = foot.bubble
-    if state["car"] is None or bubble is None:
+    if state.vehicle.car is None or bubble is None:
         return []
     ore = [p for p in foot.props.rocks if p.grade > 0.0] + [p for p in foot.props.crates if contracting.crate_contract(p)]
     placed = [(p, add(p.on.centre(), p.position)) for p in ore if p.state == "resting"]
@@ -143,7 +143,7 @@ def load_cargo():
     a rock with where it was first seen (or where it lies), a crate
     (`crate_item`) with its size's volume; the rest stay in the net. A
     toast says what."""
-    car, bubble = state["car"], foot.bubble
+    car, bubble = state.vehicle.car, foot.bubble
     loaded, left = [], 0
     for prop, point in in_net():
         c = contracting.crate_contract(prop)
@@ -155,7 +155,7 @@ def load_cargo():
             car.cargo.append(contracting.crate_item(c, prop.mass, volume))
             contracting.forget_crate(prop)
         else:
-            seen = state["seen"].pop(id(prop), None) or (prop.on.name, normalize(prop.on.relative(point)))
+            seen = state.economy.seen.pop(id(prop), None) or (prop.on.name, normalize(prop.on.relative(point)))
             car.cargo.append({"body": seen[0], "direction": tuple(seen[1]), "mass": prop.mass, "grade": prop.grade,
                               "resource": prop.resource})
         if foot.gun is not None and prop.body is not None and foot.gun.held == prop.body:
@@ -165,7 +165,7 @@ def load_cargo():
     if loaded or left:
         text = ("Loaded %d piece%s, %.0f kg" % (len(loaded), "" if len(loaded) == 1 else "s", sum(loaded))
                 + ("; %d left in the net, the hold is full" % left if left else ""))
-        state["hud"].toast(text, GOOD_TOAST if not left else hud_module.WARNING)
+        state.ui.hud.toast(text, GOOD_TOAST if not left else hud_module.WARNING)
 
 
 def build_net():
@@ -177,16 +177,16 @@ def build_net():
         engine.scene.set_material_float(entity, "gridStrength", 0.0)
         engine.scene.set_render_layer_mask(entity, 1)
         engine.scene.set_visible(entity, False)
-        state["net_posts"].append(entity)
+        state.vehicle.net_posts.append(entity)
 
 
 def draw_net(camera):
     """The net's corner posts behind the car while it is parked (not driven)."""
-    shown = state["car"] is not None and not state["driving"]
+    shown = state.vehicle.car is not None and not state.vehicle.driving
     if shown:
         centre, right, up, back = net_frame()
         rotation = euler_from_basis(right, up, scale(back, -1.0))
-    for k, entity in enumerate(state["net_posts"]):
+    for k, entity in enumerate(state.vehicle.net_posts):
         engine.scene.set_visible(entity, shown)
         if not shown:
             continue
@@ -200,13 +200,13 @@ def enter_car(anywhere=False):
     """Into the car from within ENTER_REACH of it (from anywhere with
     `anywhere`): the ore in its net loaded (load_cargo), the player gone,
     the chase camera behind the car."""
-    if state["driving"] or state["car"] is None or (not anywhere and not near_car()):
+    if state.vehicle.driving or state.vehicle.car is None or (not anywhere and not near_car()):
         return False
     load_cargo()
     foot.remove_player()
-    state["driving"] = True
-    state["chase"].reset()
-    state["hud"].toast("F gets out once slow and low", hud_module.DIM)
+    state.vehicle.driving = True
+    state.view.chase.reset()
+    state.ui.hud.toast("F gets out once slow and low", hud_module.DIM)
     print("[walker] in the car", flush=True)
     return True
 
@@ -215,14 +215,14 @@ def leave_car():
     """Out of the car, once it is slow and low enough (hovercar.Car.can_leave),
     at its left side, EXIT_OUT beyond it, facing its way; the car parks.
     Parked on an outpost's pad, with autosave on, the game is saved."""
-    car = state["car"]
-    if not state["driving"]:
+    car = state.vehicle.car
+    if not state.vehicle.driving:
         return False
-    if state["space"] is not None:
-        state["hud"].toast("Land first", hud_module.WARNING)
+    if state.space.ship is not None:
+        state.ui.hud.toast("Land first", hud_module.WARNING)
         return False
     if not car.can_leave():
-        state["hud"].toast("Slow down and come down first", hud_module.WARNING)
+        state.ui.hud.toast("Slow down and come down first", hud_module.WARNING)
         return False
     right, up, forward = car.right(), car.up(), car.heading
     side = add(car.position, scale(right, -(SHIP_HALF[0] + EXIT_OUT)))
@@ -233,30 +233,30 @@ def leave_car():
     bubble = foot.ensure_bubble(feet)
     foot.spawn(feet, forward)
     walking.place_eye()
-    state["driving"] = False
+    state.vehicle.driving = False
     set_fov(settings["fov"])
     car.target = hovercar.HOVER_MIN
-    state["car_controls"] = hovercar.CarControls()
+    state.vehicle.controls = hovercar.CarControls()
     print("[walker] out of the car", flush=True)
     outpost = economy.car_outpost()
     if outpost is not None and settings["autosave"] and not args.check:
         if saving.save_game(quiet=True) is not None:
-            state["hud"].toast("Game saved at %s" % outpost.name, GOOD_TOAST)
+            state.ui.hud.toast("Game saved at %s" % outpost.name, GOOD_TOAST)
     return bubble is not None
 
 
 def read_car_controls():
     """The car's controls, and the mouse orbiting the chase camera."""
-    state["car_controls"] = carview.read_controls(engine.input)
+    state.vehicle.controls = carview.read_controls(engine.input)
     if engine.input.is_mouse_captured():
         dx, dy = engine.input.get_mouse_delta()
         s = foot.mouse_sensitivity
-        state["chase"].orbit(dx * s, (-dy if foot.invert_y else dy) * s)
+        state.view.chase.orbit(dx * s, (-dy if foot.invert_y else dy) * s)
     if engine.input.is_gamepad_connected():
         x = engine.input.is_gamepad_button_down(keys.GAMEPAD_X)
-        if x and not state["pad_x"]:
+        if x and not state.view.pad_x:
             leave_car()
-        state["pad_x"] = x
+        state.view.pad_x = x
 
 
 def step_car(dt):
@@ -266,12 +266,12 @@ def step_car(dt):
     trunks and fixed rocks ahead (bump_car), a bump striking the fragile
     crates in its hold (strike_hold); its poses before and after kept for
     its body in the bubble."""
-    car = state["car"]
+    car = state.vehicle.car
     if car is None:
         return
     before = (car_position(), car_rotation())
-    controls = state["car_controls"] if state["driving"] else hovercar.CarControls()
-    if state["space"] is not None:
+    controls = state.vehicle.controls if state.vehicle.driving else hovercar.CarControls()
+    if state.space.ship is not None:
         spaceflight.step_space(dt)
     else:
         car.step(dt, controls, car_ground, wind=lambda point: world.wind_at(spaceflight.car_body(), point, car.height))
@@ -280,7 +280,7 @@ def step_car(dt):
     if impact > 0.0:
         contracting.strike_hold(impact)
     update_ship()
-    state["car_poses"] = (before, (car_position(), car_rotation()))
+    state.vehicle.poses = (before, (car_position(), car_rotation()))
 
 
 def car_rotation():
@@ -294,7 +294,7 @@ def bump_car(dt):
     the car's motion into it back by BUMP_BOUNCE times, and it keeps
     BUMP_KEEP of its speed. Props, the ground and the car's own body are
     passed over. Returns the speed it struck with (m/s into the surface), or 0."""
-    car, bubble = state["car"], foot.bubble
+    car, bubble = state.vehicle.car, foot.bubble
     if bubble is None or bubble.body is not planet:
         return 0.0
     up = car.up()
@@ -309,7 +309,7 @@ def bump_car(dt):
     if hit is None:
         return 0.0
     body, _, normal, _ = hit
-    if body == state["ship_body"] or foot.props.find(body) is not None or dot(normal, bubble.up(hit[1])) > 0.7:
+    if body == state.vehicle.physics_body or foot.props.find(body) is not None or dot(normal, bubble.up(hit[1])) > 0.7:
         return 0.0
     n = normalize(sub(normal, scale(bubble.up(hit[1]), dot(normal, bubble.up(hit[1])))))
     into = dot(car.velocity, n)
@@ -323,7 +323,7 @@ def move_car_body(bubble, fraction):
     """The car's kinematic body in the bubble moved `fraction` of the way
     along this frame's poses (OnFoot.step's before_step), made when the car
     comes within the bubble's reach and removed beyond it."""
-    poses = state["car_poses"]
+    poses = state.vehicle.poses
     if poses is None or bubble.body is not spaceflight.car_body():
         remove_ship_body()
         return
@@ -336,10 +336,10 @@ def move_car_body(bubble, fraction):
         remove_ship_body()
         return
     physics = foot.physics
-    body = state["ship_body"]
+    body = state.vehicle.physics_body
     if body is None:
         hull = np.array(SHIP_HULL, dtype=np.float32)
-        state["ship_body"] = physics.create_convex_hull(hull, p, q, motion="kinematic", friction=0.8)
+        state.vehicle.physics_body = physics.create_convex_hull(hull, p, q, motion="kinematic", friction=0.8)
     elif length(sub(physics.get_transform(body)[0], p)) > JUMP_DISTANCE:
         physics.set_transform(body, p, q)
     else:
@@ -348,13 +348,13 @@ def move_car_body(bubble, fraction):
 
 def place_chase(dt):
     """The camera behind the car while driving; the field of view widening with its speed."""
-    car = state["car"]
+    car = state.vehicle.car
     heading, up = car.heading, car.up()
-    if state["space"] is not None:
-        _, up, heading = state["space"].axes()
-    eye, basis = state["chase"].update(dt, car_position(), heading, up, car.speed(), camera_ground)
-    state["position"], state["forward"] = eye, basis[2]
-    state["chase_basis"] = basis
+    if state.space.ship is not None:
+        _, up, heading = state.space.ship.axes()
+    eye, basis = state.view.chase.update(dt, car_position(), heading, up, car.speed(), camera_ground)
+    state.view.position, state.view.forward = eye, basis[2]
+    state.view.chase_basis = basis
     set_fov(carview.fov(settings["fov"], car.speed()))
 
 

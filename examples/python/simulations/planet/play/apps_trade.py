@@ -69,13 +69,13 @@ class Market:
         return outpost.name if outpost is not None else "No outpost here"
 
     def corner(self, surface, right, top):
-        slate.credits_corner(surface, right, top, state["market"].credits)
+        slate.credits_corner(surface, right, top, state.economy.market.credits)
 
     def hints(self):
         return [(("Enter",), "Sell the hold")] if economy.car_outpost() is not None else []
 
     def note(self):
-        return apps.sentence(state["trade_note"]) or "Ore settled on the pad sells by itself, at these prices."
+        return apps.sentence(state.economy.trade_note) or "Ore settled on the pad sells by itself, at these prices."
 
     def key(self, key):
         if key in (keys.ENTER, keys.KP_ENTER) and economy.car_outpost() is not None:
@@ -90,7 +90,7 @@ class Market:
             x = left + fs.text_width(self.label().upper(), "label", "text_medium") + 12.0
             closed = storms.closed(outpost)
             x += fs.pill(layer, "Pads closed" if closed else "Pads open", x, top - 69.0, CORAL if closed else MINT)
-            rep = round(state["reputation"].get(outpost.name, 0.0))
+            rep = round(state.contracts.reputation.get(outpost.name, 0.0))
             fs.pill(layer, "Rep %+d" % rep, x + 8.0, top - 69.0, MINT if rep >= 0 else CORAL)
         main = 0.6 * width
         self.draw_prices(surface, outpost, left, top, main, height)
@@ -142,7 +142,7 @@ class Market:
     def draw_hold(self, surface, outpost, left, top, width):
         """The car's hold pane; returns its height."""
         layer, mesh = surface.layer, surface.mesh
-        car = state["car"]
+        car = state.vehicle.car
         rows = hovercar.ore_by_resource(car.cargo) if car is not None else []
         height = 150.0 + 34.0 * len(rows)
         apps.pane(surface, left, top, width, height)
@@ -182,7 +182,7 @@ class Market:
 
     def draw_fuel(self, surface, outpost, left, top, width):
         layer, mesh = surface.layer, surface.mesh
-        car = state["car"]
+        car = state.vehicle.car
         height = 170.0
         apps.pane(surface, left, top, width, height)
         x, right = left + 24.0, left + width - 24.0
@@ -200,10 +200,10 @@ class Market:
         need = (p.fuel_capacity - car.fuel) * on_pad.fuel_price if on_pad is not None else 0.0
         surface.button(x, by, half, "Fill", economy.fill_tank, fs.credits(need) if on_pad is not None else None,
                        enabled=on_pad is not None and need > 0.5)
-        survey = trade.survey_sale(outpost, state["survey_data"], world.time)[0] if outpost is not None else 0.0
+        survey = trade.survey_sale(outpost, state.economy.survey_data, world.time)[0] if outpost is not None else 0.0
         surface.button(x + half + 10.0, by, right - x - half - 10.0, "Sell survey data", economy.sell_survey,
                        fs.credits(survey) if outpost is not None else None,
-                       enabled=outpost is not None and state["survey_data"] > 0.5)
+                       enabled=outpost is not None and state.economy.survey_data > 0.5)
 
 
 # ── Workshop ───────────────────────────────────────────────────────────────
@@ -222,9 +222,9 @@ class Workshop:
         return "Upgrades"
 
     def corner(self, surface, right, top):
-        x = slate.credits_corner(surface, right, top, state["market"].credits) - 30.0
+        x = slate.credits_corner(surface, right, top, state.economy.market.credits) - 30.0
         for part in reversed(pois.PARTS):
-            n = state["parts"].get(part, 0)
+            n = state.economy.parts.get(part, 0)
             x -= fs.pill(surface.layer, "%s %d" % (pois.PART_NAMES[part], n), x, top + 40.0, ICE if n else MIST,
                          "right") + 8.0
 
@@ -232,7 +232,7 @@ class Workshop:
         return [(("Enter",), "Buy")]
 
     def note(self):
-        return apps.sentence(state["upgrade_note"]) or "Parts come from salvaging wrecks and opening rigs' crates."
+        return apps.sentence(state.economy.upgrade_note) or "Parts come from salvaging wrecks and opening rigs' crates."
 
     def key(self, key):
         if key in (keys.ENTER, keys.KP_ENTER):
@@ -242,7 +242,7 @@ class Workshop:
 
     def upgrade(self):
         if self.chosen is None:
-            first = next((u for u in WALKER_UPGRADES if u.key not in state["owned"]), WALKER_UPGRADES[0])
+            first = next((u for u in WALKER_UPGRADES if u.key not in state.economy.owned), WALKER_UPGRADES[0])
             self.chosen = first.key
         return upgrades.BY_KEY[self.chosen]
 
@@ -265,11 +265,11 @@ class Workshop:
             if group not in {path.split(".")[0] for path in upgrades.effects_for(u, (group,))}:
                 continue
             h = NODE[1]
-            owned = u.key in state["owned"]
-            needs = [k for k in u.requires if k not in state["owned"]]
+            owned = u.key in state.economy.owned
+            needs = [k for k in u.requires if k not in state.economy.owned]
             chosen = u.key == self.chosen
             if previous is not None and previous in u.requires:
-                colour = MINT if previous in state["owned"] else line
+                colour = MINT if previous in state.economy.owned else line
                 mesh.face([(left + 30.0, y - NODE[2]), (left + 32.0, y - NODE[2]), (left + 32.0, y), (left + 30.0, y)],
                           [colour] * 4)
             hot = surface.over(left, y, width, h)
@@ -300,9 +300,9 @@ class Workshop:
         group_name = dict((g, n) for n, g in GROUPS)[group]
         fs.label(layer, "%s · tier %d" % (group_name, upgrades.tier(u)), (x, top + 30.0), HOLO)
         fs.write(layer, slate.fit_text(u.name, right - x, 24, "display"), (x, top + 66.0), 24, ICE, "display")
-        owned = u.key in state["owned"]
-        now = state["params"]
-        after = now if owned else upgrades.effective(economy.base_params(), state["owned"] | {u.key})
+        owned = u.key in state.economy.owned
+        now = state.economy.params
+        after = now if owned else upgrades.effective(economy.base_params(), state.economy.owned | {u.key})
         y = top + 108.0
         for path in upgrades.effects_for(u, (group,)):
             g, attribute = path.split(".")
@@ -318,20 +318,20 @@ class Workshop:
         line = fs.tint(ICE, 0.1, fs.ON_SLATE)
         mesh.face([(x, y - 6.0), (right, y - 6.0), (right, y - 5.0), (x, y - 5.0)], [line] * 4)
         y += 16.0
-        credits = state["market"].credits
+        credits = state.economy.market.credits
         rows = [(fs.credits(u.cost), "you have %s" % fs.grouped(credits), credits >= u.cost)]
         for part, n in u.parts.items():
-            held = state["parts"].get(part, 0)
+            held = state.economy.parts.get(part, 0)
             rows.append(("%d %s" % (n, pois.PART_NAMES[part].lower()), "you have %d" % held, held >= n))
         for k in u.requires:
-            rows.append((upgrades.BY_KEY[k].name, "owned" if k in state["owned"] else "needed first",
-                         k in state["owned"]))
+            rows.append((upgrades.BY_KEY[k].name, "owned" if k in state.economy.owned else "needed first",
+                         k in state.economy.owned))
         for name, have, ok in rows:
             fs.write(layer, name, (x, y), "body", ICE)
             fs.write(layer, have, (right, y), "body", MINT if ok else CORAL, "text", "right")
             y += 28.0
         by = top + height - fs.BUTTON_HEIGHT - 24.0
-        reason = upgrades.refusal(u, state["owned"], credits, state["parts"])
+        reason = upgrades.refusal(u, state.economy.owned, credits, state.economy.parts)
         outpost = economy.at_outpost()
         if owned:
             surface.button(x, by, right - x, "Owned", None, enabled=False)
@@ -367,13 +367,13 @@ class Vehicle:
     name, icon = "Vehicle", "vehicle"
 
     def label(self):
-        return "Vehicle · %s" % ("driving" if state["driving"] else "parked")
+        return "Vehicle · %s" % ("driving" if state.vehicle.driving else "parked")
 
     def title(self):
         return "Hover car"
 
     def corner(self, surface, right, top):
-        car = state["car"]
+        car = state.vehicle.car
         if car is None:
             return
         x = right
@@ -388,7 +388,7 @@ class Vehicle:
             w = fs.button_width("Fill the tank")
             x -= surface.button(x - w, top + 12.0, w, "Fill the tank", economy.fill_tank) + 10.0
         here = apps.where()
-        if not state["driving"] and here is not None and here[0] is spaceflight.car_body():
+        if not state.vehicle.driving and here is not None and here[0] is spaceflight.car_body():
             metres = apps.along(here, vehicle.car_position())[0]
             text, value = "Waypoint to car", fs.distance(metres)
             w = fs.button_width(text, value)
@@ -398,13 +398,13 @@ class Vehicle:
         return []
 
     def note(self):
-        return apps.sentence(state["car_note"]) or "The hold sells from the Market app when the car is on a pad."
+        return apps.sentence(state.vehicle.note) or "The hold sells from the Market app when the car is on a pad."
 
     def draw(self, surface, left, top, width, height):
-        car = state["car"]
+        car = state.vehicle.car
         if car is None:
             return
-        net = vehicle.in_net() if not state["driving"] else []
+        net = vehicle.in_net() if not state.vehicle.driving else []
         if net:
             x = left + fs.text_width(self.label().upper(), "label", "text_medium") + 12.0
             fs.pill(surface.layer, "Net ready", x, top - 69.0, MINT)
@@ -463,7 +463,7 @@ class Vehicle:
         n = len(net)
         text = ("Nothing in the net." if n == 0 else
                 "%d %s in the net load when you get in, each that fits the hold." % (n, "thing" if n == 1 else "things"))
-        if state["driving"]:
+        if state.vehicle.driving:
             text = "The net loads when you get in by a parked car."
         fs.write(layer, slate.fit_text(text, width - 40.0), (cx, top + height - 40.0), "body", ICE, "text", "center")
 
@@ -517,7 +517,7 @@ class Vehicle:
         apps.pane(surface, left, top, width, 96.0)
         x = left + 24.0
         fs.label(layer, "Fitted", (x, top + 30.0))
-        fitted = [u for u in WALKER_UPGRADES if u.key in state["owned"] and upgrades.effects_for(u, ("car",))]
+        fitted = [u for u in WALKER_UPGRADES if u.key in state.economy.owned and upgrades.effects_for(u, ("car",))]
         if not fitted:
             fs.write(layer, "Nothing yet: the Workshop app fits upgrades on a pad.", (x, top + 64.0), "body", MIST)
         for u in fitted:

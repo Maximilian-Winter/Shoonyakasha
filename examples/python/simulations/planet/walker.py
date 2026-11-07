@@ -287,19 +287,19 @@ HOLDS = (None, "prograde", "retrograde")
 
 def frame(dt):
     clock = world.time
-    world.begin_frame(state["position"])
+    world.begin_frame(state.view.position)
     site.update_outposts()
     walking.maybe_spawn()
-    paused = state["system"].visible or state["start"].visible
+    paused = state.ui.system.visible or state.ui.start.visible
     elapsed = dt                 # the frame's real time; the world's stands still while paused
-    for screen in (state["start"], state["system"], state["slate"]):
+    for screen in (state.ui.start, state.ui.system, state.ui.slate):
         screen.update(engine.input, elapsed)
-    covered = state["slate"].visible   # the world runs, the player waits
+    covered = state.ui.slate.visible   # the world runs, the player waits
     if args.check:
         checks.run_check(elapsed)
-    elif state["driving"] and state["space"] is not None and not paused and not covered:
-        carview.read_space_controls(engine.input, state["space_controls"], elapsed)
-    elif state["driving"] and not paused and not covered:
+    elif state.vehicle.driving and state.space.ship is not None and not paused and not covered:
+        carview.read_space_controls(engine.input, state.space.controls, elapsed)
+    elif state.vehicle.driving and not paused and not covered:
         vehicle.read_car_controls()
     elif foot.player is not None and not paused and not covered:
         foot.read_controls(engine.input)
@@ -307,37 +307,37 @@ def frame(dt):
         walking.ignore_held_buttons()
         walking.read_bumpers()
         walking.read_pad_enter()
-    if state["driving"] and (paused or covered):
-        state["car_controls"] = hovercar.CarControls()
+    if state.vehicle.driving and (paused or covered):
+        state.vehicle.controls = hovercar.CarControls()
     if paused:
         dt = 0.0
     dt *= spaceflight.time_warp()
     world.time += dt
-    latency = world.probe_latency * state["frame_ms"] / 1000.0
+    latency = world.probe_latency * state.view.frame_ms / 1000.0
     foot.props.fly(world.time - clock, latency)
     active = foot.player is not None and not covered and not paused
     vehicle.step_car(dt)
-    viewpoint = state["position"]
-    if state["driving"]:
+    viewpoint = state.view.position
+    if state.vehicle.driving:
         viewpoint = vehicle.car_position()
-        if foot.bubble is None and (state["car"].height or 0.0) < 0.5 * Bubble.RADIUS:
+        if foot.bubble is None and (state.vehicle.car.height or 0.0) < 0.5 * Bubble.RADIUS:
             foot.ensure_bubble(viewpoint)
-    foot.step(dt, viewpoint, state["position"], latency, active=active, before_step=vehicle.move_car_body)
+    foot.step(dt, viewpoint, state.view.position, latency, active=active, before_step=vehicle.move_car_body)
     showers.update_showers()
     storms.update_storms(dt)
     foot.props.probe(foot.bubble, EXTRA_PROBES)
     walking.place_eye()
-    if state["driving"]:
+    if state.vehicle.driving:
         vehicle.place_chase(elapsed)
     walking.capture_mouse()
     walking.set_max_levels()
 
-    camera = state["position"]
+    camera = state.view.position
     basis = showers.shaken(walking.view_basis())
     survival.update_lights(camera)
     foot.request_nearby(camera, bodies)
     world.end_frame(camera, basis, dt, viewpoint=camera,
-                    patch=vehicle.car_patch_request() if state["car"] is not None else None)
+                    patch=vehicle.car_patch_request() if state.vehicle.car is not None else None)
     ground = world.site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
@@ -359,45 +359,45 @@ def frame(dt):
     saving.autosave(elapsed)
     walking.capture_toast()
     foot.end_frame()
-    state["frame_ms"] = 0.9 * state["frame_ms"] + 0.1 * elapsed * 1000.0
+    state.view.frame_ms = 0.9 * state.view.frame_ms + 0.1 * elapsed * 1000.0
     return True
 
 
 def on_init():
     world.setup()
     site.build_site()
-    state["home"] = home_outpost(world)
-    state["outposts"] = [state["home"]]
+    state.site.home = home_outpost(world)
+    state.site.outposts = [state.site.home]
     site.begin_survey()
     site.build_ship_model()
     vehicle.build_net()
-    state["viewmodel"] = Viewmodel(engine, box())
-    state["car_glows"] = carview.EngineGlows(engine)
-    state["meteor_glows"] = Glows(engine, METEOR_DISCS, METEOR_STREAKS)
-    state["rain_glows"] = Glows(engine, 0, RAIN_DROPS)
+    state.ui.viewmodel = Viewmodel(engine, box())
+    state.ui.car_glows = carview.EngineGlows(engine)
+    state.ui.meteor_glows = Glows(engine, METEOR_DISCS, METEOR_STREAKS)
+    state.ui.rain_glows = Glows(engine, 0, RAIN_DROPS)
     foot.too_hot = showers.too_hot
     foot.rocks.on_split = showers.split_hot
-    state["hud"] = Hud(engine)
-    state["hud"].show(False)
-    state["map"] = ExploredMap(world)
-    state["map_view"] = MapView(engine)
-    state["map_view"].show(False)
-    state["hud"].on_toast = apps.log_toast
-    state["slate"] = slate.Slate(engine, apps_trade.apps_list(), system=lambda: menus.set_paused(True))
-    state["system"] = menus.system_screen()
-    state["start"] = menus.start_screen()
+    state.ui.hud = Hud(engine)
+    state.ui.hud.show(False)
+    state.ui.map = ExploredMap(world)
+    state.ui.map_view = MapView(engine)
+    state.ui.map_view.show(False)
+    state.ui.hud.on_toast = apps.log_toast
+    state.ui.slate = slate.Slate(engine, apps_trade.apps_list(), system=lambda: menus.set_paused(True))
+    state.ui.system = menus.system_screen()
+    state.ui.start = menus.start_screen()
     menus.apply_settings()
     if not args.check and save.exists(save_base):
         try:
-            state["last_save"] = save.read(save_base)[0]
+            state.session.last_save = save.read(save_base)[0]
         except save.SaveError as error:
             print("[walker] %s" % error, flush=True)
-    if state["last_save"] is not None:
-        state["starting"] = True
-        state["start"].show(True)
+    if state.session.last_save is not None:
+        state.session.starting = True
+        state.ui.start.show(True)
     _, up, _, north = world.site_frame()
-    state["position"] = add(world.site_ground(), scale(up, 5.0))
-    state["forward"] = north
+    state.view.position = add(world.site_ground(), scale(up, 5.0))
+    state.view.forward = north
     engine.ecs.add_system("WalkerFrame", frame, priority=-1)
 
 
@@ -411,10 +411,10 @@ def on_key(key):
     out), G its space mode
     (in or out), in space mode T the assist, H the nose hold and , . the
     time warp, F5 a save, F9 a load."""
-    system, tablet = state["system"], state["slate"]
-    playing = foot.player is not None or state["driving"]
-    if state["starting"]:
-        state["start"].key(key)
+    system, tablet = state.ui.system, state.ui.slate
+    playing = foot.player is not None or state.vehicle.driving
+    if state.session.starting:
+        state.ui.start.key(key)
         return
     if key == keys.P:
         walking.take_capture()
@@ -445,32 +445,32 @@ def on_key(key):
     elif key == keys.M and playing:
         tablet.open("Map")
     elif key == keys.F:
-        if state["driving"]:
+        if state.vehicle.driving:
             vehicle.leave_car()
         else:
             vehicle.enter_car()
-    elif key == keys.G and state["driving"]:
-        if state["space"] is None:
+    elif key == keys.G and state.vehicle.driving:
+        if state.space.ship is None:
             spaceflight.enter_space()
         else:
             spaceflight.leave_space()
-    elif key == keys.T and state["space"] is not None:
-        controls = state["space_controls"]
+    elif key == keys.T and state.space.ship is not None:
+        controls = state.space.controls
         controls.assist = not controls.assist
-        state["hud"].toast("Assist %s" % ("on" if controls.assist else "off"))
-    elif key in (keys.COMMA, keys.PERIOD) and state["space"] is not None:
+        state.ui.hud.toast("Assist %s" % ("on" if controls.assist else "off"))
+    elif key in (keys.COMMA, keys.PERIOD) and state.space.ship is not None:
         spaceflight.set_warp(1 if key == keys.PERIOD else -1)
-    elif key == keys.H and state["space"] is not None:
-        state["hold"] = HOLDS[(HOLDS.index(state["hold"]) + 1) % len(HOLDS)]
-        state["hud"].toast("Nose hold: %s" % (state["hold"] or "off"))
+    elif key == keys.H and state.space.ship is not None:
+        state.space.hold = HOLDS[(HOLDS.index(state.space.hold) + 1) % len(HOLDS)]
+        state.ui.hud.toast("Nose hold: %s" % (state.space.hold or "off"))
     elif key == keys.ESCAPE and playing:
         menus.set_paused(True)
 
 
 def on_scroll(x_offset, y_offset):
-    if state["slate"].opened:
-        state["slate"].scroll(y_offset)
-    elif foot.player is not None and not state["driving"]:
+    if state.ui.slate.opened:
+        state.ui.slate.scroll(y_offset)
+    elif foot.player is not None and not state.vehicle.driving:
         foot.gun_controls.distance += y_offset
 
 

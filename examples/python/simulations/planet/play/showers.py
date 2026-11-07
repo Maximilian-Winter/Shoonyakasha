@@ -55,26 +55,26 @@ MOON_HEAD = 0.3                 # of a meteor's head's light on the moon, where 
 def shower_here():
     """The unit direction under the camera on the planet, or None at the start's menu, with neither a player
     nor the car driven, or with the camera over the moon."""
-    if state["starting"] or (foot.player is None and not state["driving"]):
+    if state.session.starting or (foot.player is None and not state.vehicle.driving):
         return None
-    if world.body_under(state["position"]) is not planet:
+    if world.body_under(state.view.position) is not planet:
         return None
-    return normalize(planet.relative(state["position"]))
+    return normalize(planet.relative(state.view.position))
 
 
 def camera_on():
     """(the world body under the camera, the unit direction to the camera from
     its centre), or None at the start's menu or with neither a player nor
     the car driven."""
-    if state["starting"] or (foot.player is None and not state["driving"]):
+    if state.session.starting or (foot.player is None and not state.vehicle.driving):
         return None
-    body = world.body_under(state["position"])
-    return body, normalize(body.relative(state["position"]))
+    body = world.body_under(state.view.position)
+    return body, normalize(body.relative(state.view.position))
 
 
 def shower_body():
     """The world body the shower falls on."""
-    return state["shower_body"] or planet
+    return state.showers.body or planet
 
 
 def body_gm(body):
@@ -83,40 +83,40 @@ def body_gm(body):
 
 def set_shower(shower):
     """`shower` (events.Shower) the next or current one, nothing of it measured, warned of or struck yet."""
-    if state["shower_asked"] is not None and world.extra_probes == state["shower_asked"]:
+    if state.showers.asked is not None and world.extra_probes == state.showers.asked:
         world.extra_probes = []
-    state["shower"] = shower
-    state["impact_heights"], state["paths"] = {}, {}
-    state["shower_asked"], state["shower_asking"] = None, []
-    state["shower_warned"], state["struck"] = False, 0
+    state.showers.shower = shower
+    state.showers.impact_heights, state.showers.paths = {}, {}
+    state.showers.asked, state.showers.asking = None, []
+    state.showers.warned, state.showers.struck = False, 0
 
 
 def probe_shower():
     """The ground under the shower's impacts not yet struck measured with
     the world's extra probes, as the points of interest are: only while
     nothing else uses them."""
-    shower, asked = state["shower"], state["shower_asked"]
+    shower, asked = state.showers.shower, state.showers.asked
     if shower is None or (world.extra_probes and world.extra_probes != asked):
         return
     if asked is not None:
         if [probe for probe, _ in world.extra_heights] != asked:
             return
-        for k, (_, h) in zip(state["shower_asking"], world.extra_heights):
-            state["impact_heights"][k] = h
-        state["shower_asked"], state["shower_asking"] = None, []
+        for k, (_, h) in zip(state.showers.asking, world.extra_heights):
+            state.showers.impact_heights[k] = h
+        state.showers.asked, state.showers.asking = None, []
         world.extra_probes = []
-    wanted = [k for k in range(state["struck"], len(shower.impacts)) if k not in state["impact_heights"]]
+    wanted = [k for k in range(state.showers.struck, len(shower.impacts)) if k not in state.showers.impact_heights]
     if wanted:
         asked = [(shower.impacts[k].direction, shower_body()) for k in wanted[:EXTRA_PROBES]]
         world.extra_probes = asked
-        state["shower_asked"], state["shower_asking"] = asked, wanted[:EXTRA_PROBES]
+        state.showers.asked, state.showers.asking = asked, wanted[:EXTRA_PROBES]
 
 
 def shower_waiting():
     """Whether the shower has impacts not yet struck whose ground is not yet measured."""
-    shower = state["shower"]
-    return shower is not None and any(k not in state["impact_heights"]
-                                      for k in range(state["struck"], len(shower.impacts)))
+    shower = state.showers.shower
+    return shower is not None and any(k not in state.showers.impact_heights
+                                      for k in range(state.showers.struck, len(shower.impacts)))
 
 
 def on_land(body, direction, height):
@@ -142,54 +142,54 @@ def update_showers():
     body. Once all have struck, the next is planned. Under --check none is planned; the check gives its own. The
     props that have cooled or are gone leave `hot`."""
     present = {id(p) for p in foot.props.rocks}
-    state["hot"] = {i: hot for i, hot in state["hot"].items()
+    state.showers.hot = {i: hot for i, hot in state.showers.hot.items()
                     if i in present and events.heat(world.time - hot[0], hot[1]) > 0.0}
-    on, shower = camera_on(), state["shower"]
+    on, shower = camera_on(), state.showers.shower
     if args.check and shower is None:
         return
     if on is None or (shower is not None and on[0] is not shower_body()):
-        if shower is None or state["starting"]:
+        if shower is None or state.session.starting:
             return
         here = shower.centre             # away from its body: a shower planned goes on
     else:
         here = on[1]
     if shower is None:
         body = on[0]
-        start, state["next_shower"] = state["next_shower"], None
+        start, state.showers.next_start = state.showers.next_start, None
         if start is not None:
             start = max(start, world.time + events.WARNING_SECONDS)
-        state["shower_body"] = None if body is planet else body
+        state.showers.body = None if body is planet else body
         gap = events.MEAN_GAP if body is planet else events.MOON_MEAN_GAP
-        set_shower(events.schedule(world.time, state["shower_rng"], here, body.radius, start, gap))
-        state["shower_tries"] = 0
-        shower = state["shower"]
+        set_shower(events.schedule(world.time, state.showers.rng, here, body.radius, start, gap))
+        state.showers.tries = 0
+        shower = state.showers.shower
     body = shower_body()
     probe_shower()
-    heights = state["impact_heights"]
+    heights = state.showers.impact_heights
     large = next(k for k, i in enumerate(shower.impacts) if i.large)
-    known = large in heights or state["struck"] > large
-    if (large in heights and not state["shower_warned"] and state["shower_tries"] < SHOWER_TRIES
+    known = large in heights or state.showers.struck > large
+    if (large in heights and not state.showers.warned and state.showers.tries < SHOWER_TRIES
             and not on_land(body, shower.impacts[large].direction, heights[large])):
-        state["shower_tries"] += 1
-        set_shower(events.schedule(world.time, state["shower_rng"], here, body.radius, shower.start))
+        state.showers.tries += 1
+        set_shower(events.schedule(world.time, state.showers.rng, here, body.radius, shower.start))
         return
-    if known and not state["shower_warned"] and world.time >= shower.start - events.WARNING_SECONDS:
-        state["shower_warned"] = True
+    if known and not state.showers.warned and world.time >= shower.start - events.WARNING_SECONDS:
+        state.showers.warned = True
         centre = add(body.centre(), scale(shower.centre, body.radius))
-        towards = bearing(here, sub(centre, state["position"]))
-        state["hud"].toast("Meteor shower inbound: bearing %03.0f, %s"
+        towards = bearing(here, sub(centre, state.view.position))
+        state.ui.hud.toast("Meteor shower inbound: bearing %03.0f, %s"
                            % (towards or 0.0, distance_text(events.ground_distance(here, shower.centre,
                                                                                    body.radius))), METEOR_MARKER)
     for k, impact in enumerate(shower.impacts):
-        if k in heights and k not in state["paths"]:
+        if k in heights and k not in state.showers.paths:
             point = scale(impact.direction, body.radius + heights[k])
-            state["paths"][k] = events.Path(point, events.velocity(impact, impact.direction), body_gm(body),
+            state.showers.paths[k] = events.Path(point, events.velocity(impact, impact.direction), body_gm(body),
                                             body.radius)
-    while state["struck"] < len(shower.impacts) and shower.impacts[state["struck"]].time <= world.time:
-        strike(state["struck"])
-        state["struck"] += 1
-    if state["struck"] == len(shower.impacts):
-        state["shower"] = None
+    while state.showers.struck < len(shower.impacts) and shower.impacts[state.showers.struck].time <= world.time:
+        strike(state.showers.struck)
+        state.showers.struck += 1
+    if state.showers.struck == len(shower.impacts):
+        state.showers.shower = None
 
 
 def meteor_rock(impact, ground, body):
@@ -212,7 +212,7 @@ def meteor_rock(impact, ground, body):
               "colour": list(rock_colour(body.index, impact.grade, resources.IRIDIUM)), "key": None,
               "ground": None, "grade": impact.grade, "resource": resources.IRIDIUM}
     prop = foot.rocks.restore(foot.physics, record, {body.name: body})
-    state["seen"][id(prop)] = (body.name, up)
+    state.economy.seen[id(prop)] = (body.name, up)
     return prop
 
 
@@ -228,8 +228,8 @@ def strike(k):
     up to SHAKE_ANGLE, both SMALL_LIGHT as strong for a small impact; and a
     plume of dust (PLUME_PUFFS, or SMALL_PUFFS) at its point. The large
     one's meteorite is marked on the compass and announced by a toast."""
-    impact, body = state["shower"].impacts[k], shower_body()
-    ground = state["impact_heights"].get(k, body.heights[1])
+    impact, body = state.showers.shower.impacts[k], shower_body()
+    ground = state.showers.impact_heights.get(k, body.heights[1])
     up = impact.direction
     point = add(body.centre(), scale(up, body.radius + ground))
     on = camera_on()
@@ -237,27 +237,27 @@ def strike(k):
     if impact.large:
         radius, depth, rim = impact.crater
         crater = planet_world.Crater(body.index, up, radius, depth, rim)
-        state["craters"] = events.keep(state["craters"], crater, world.time, here, body.radius)
-        world.set_craters([c for c, _ in state["craters"]])
+        state.showers.craters = events.keep(state.showers.craters, crater, world.time, here, body.radius)
+        world.set_craters([c for c, _ in state.showers.craters])
     prop = meteor_rock(impact, ground, body)
-    state["hot"][id(prop)] = (world.time, events.LARGE_COOLING if impact.large else events.SMALL_COOLING)
+    state.showers.hot[id(prop)] = (world.time, events.LARGE_COOLING if impact.large else events.SMALL_COOLING)
     blast = impact.crater[0] if impact.large else SMALL_BLAST
     push(point, PUSH_REACH * blast)
     light = 1.0 if impact.large else SMALL_LIGHT
-    distance = length(sub(point, state["position"]))
-    state["flash"] = (world.time, FLASH_ALPHA * light * min(1.0, (FLASH_REACH / max(distance, 1.0)) ** 2))
+    distance = length(sub(point, state.view.position))
+    state.showers.flash = (world.time, FLASH_ALPHA * light * min(1.0, (FLASH_REACH / max(distance, 1.0)) ** 2))
     if distance < SHAKE_REACH:
-        state["shake"] = (world.time, SHAKE_ANGLE * light * (1.0 - distance / SHAKE_REACH))
+        state.showers.shake = (world.time, SHAKE_ANGLE * light * (1.0 - distance / SHAKE_REACH))
     east, north = local_frame(up)
     puffs = PLUME_PUFFS if impact.large else SMALL_PUFFS
     for n in range(puffs):
         a = 2.0 * math.pi * n / puffs
         offset = scale(add(scale(east, math.cos(a)), scale(north, math.sin(a))), 0.3 * blast)
-        state["plumes"].append((add(point, offset), up, world.time, blast, light, 0.5 + 0.5 * n / puffs))
+        state.showers.plumes.append((add(point, offset), up, world.time, blast, light, 0.5 + 0.5 * n / puffs))
     if impact.large:
-        state["meteorite"] = prop
-        state["hud"].toast("Meteorite down: bearing %03.0f, %s"
-                           % (bearing(here, sub(point, state["position"])) or 0.0,
+        state.showers.meteorite = prop
+        state.ui.hud.toast("Meteorite down: bearing %03.0f, %s"
+                           % (bearing(here, sub(point, state.view.position)) or 0.0,
                               distance_text(events.ground_distance(here, up, body.radius))), METEOR_MARKER)
 
 
@@ -282,23 +282,23 @@ def push(point, reach):
 def too_hot(body):
     """Whether the physics body `body` is a prop still hot from its impact (the gun's TOO HOT)."""
     prop = foot.props.find(body) if body is not None else None
-    hot = state["hot"].get(id(prop)) if prop is not None else None
+    hot = state.showers.hot.get(id(prop)) if prop is not None else None
     return hot is not None and events.heat(world.time - hot[0], hot[1]) > 0.0
 
 
 def split_hot(boulder, chunks):
     """The chunks of a hot meteorite as hot as it was (Rocks.on_split)."""
-    hot = state["hot"].get(id(boulder)) if boulder is not None else None
+    hot = state.showers.hot.get(id(boulder)) if boulder is not None else None
     if hot is not None:
         for chunk in chunks:
-            state["hot"][id(chunk)] = hot
-    if boulder is not None and boulder is state["meteorite"]:
-        state["meteorite"] = None
+            state.showers.hot[id(chunk)] = hot
+    if boulder is not None and boulder is state.showers.meteorite:
+        state.showers.meteorite = None
 
 
 def meteorite_point():
     """The meteorite still lying whole, planet space, or None."""
-    meteorite = state["meteorite"]
+    meteorite = state.showers.meteorite
     if meteorite is None or not any(p is meteorite for p in foot.props.rocks):
         return None
     body, position, _ = foot.prop_state(meteorite)
@@ -307,7 +307,7 @@ def meteorite_point():
 
 def flash_tint():
     """The impact's flash over the screen ((r, g, b), alpha), fading over FLASH_SECONDS, or None."""
-    flash = state["flash"]
+    flash = state.showers.flash
     if flash is None or not 0.0 <= world.time - flash[0] < FLASH_SECONDS:
         return None
     return FLASH_COLOUR, flash[1] * (1.0 - (world.time - flash[0]) / FLASH_SECONDS)
@@ -315,7 +315,7 @@ def flash_tint():
 
 def shaken(basis):
     """The view's `basis` (right, up, forward) turned by the impact's shake, fading over SHAKE_SECONDS."""
-    shake = state["shake"]
+    shake = state.showers.shake
     if shake is None or not 0.0 <= world.time - shake[0] < SHAKE_SECONDS:
         return basis
     age = world.time - shake[0]
@@ -345,15 +345,15 @@ def draw_showers(camera, basis):
       from the camera;
     - each hot prop a disc HOT_SIZE times its radius across in HOT_GLOW
       times its heat."""
-    glows = state["meteor_glows"]
+    glows = state.ui.meteor_glows
     glows.begin(basis)
     body = shower_body()
     now, centre, airless = world.time, body.centre(), body is not planet
     pixel = math.radians(settings["fov"]) / max(1, engine.framebuffer_size[1])
     heads = 0
-    shower = state["shower"]
-    for k in range(state["struck"], len(shower.impacts) if shower is not None else 0):
-        impact, path = shower.impacts[k], state["paths"].get(k)
+    shower = state.showers.shower
+    for k in range(state.showers.struck, len(shower.impacts) if shower is not None else 0):
+        impact, path = shower.impacts[k], state.showers.paths.get(k)
         before = impact.time - now
         if path is None or not 0.0 < before <= path.duration:
             continue
@@ -371,8 +371,8 @@ def draw_showers(camera, basis):
             glows.streak(sub(last, camera), sub(point, camera), TRAIL_WIDTH * size * fade,
                          scale(TRAIL_GLOW, TRAIL_LIGHT * light * fade))
             last = point
-    state["plumes"] = [p for p in state["plumes"] if now - p[2] < PLUME_SECONDS]
-    for point, up, since, blast, light, rise in state["plumes"]:
+    state.showers.plumes = [p for p in state.showers.plumes if now - p[2] < PLUME_SECONDS]
+    for point, up, since, blast, light, rise in state.showers.plumes:
         age = now - since
         if age < 0.0:
             continue
@@ -381,10 +381,10 @@ def draw_showers(camera, basis):
         fade = (1.0 - age / PLUME_SECONDS) * min(1.0, age / 0.3) * min(1.0, length(at) / (PLUME_NEAR * size))
         glows.disc(at, size, scale(PLUME_COLOUR, light * fade))
     for prop in foot.props.rocks:
-        hot = state["hot"].get(id(prop))
+        hot = state.showers.hot.get(id(prop))
         heat = events.heat(now - hot[0], hot[1]) if hot is not None else 0.0
         if heat > 0.0:
             body, position, _ = foot.prop_state(prop)
             glows.disc(sub(add(body.centre(), position), camera), HOT_SIZE * prop.radius, scale(HOT_GLOW, heat))
     glows.end()
-    state["heads_drawn"] = heads
+    state.showers.heads_drawn = heads

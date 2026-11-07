@@ -236,16 +236,16 @@ def run_check(dt):
     (with _river_above added), in space mode (with _space added), on the moon (with _moon added) and at
     night (with _night added)."""
     player = foot.player
-    check = state["check"]
+    check = state.session.check
     if player is None and (check is None or check["stage"] not in ("reload", "drive", "fly", "land", "out", "lake", "lake_above", "to_river", "river", "river_above", "fuel", "space", "night", "net_out")):
         return
     if check is None:
-        check = state["check"] = {"stage": "ship" if args.shot else "walk", "time": 0.0,
+        check = state.session.check = {"stage": "ship" if args.shot else "walk", "time": 0.0,
                                   "start": foot.bubble.to_world(player.feet())}
     check["time"] += dt
     stage, t = check["stage"], check["time"]
     if stage == "ship":
-        to_ship = sub(foot.bubble.to_bubble(state["ship"][0]), player.feet())
+        to_ship = sub(foot.bubble.to_bubble(state.site.ship[0]), player.feet())
         if t < SHIP_SHOT_WALK:
             player.heading = player.level(scale(to_ship, -1.0), player.up())
             foot.controls.forward = 1.0
@@ -256,18 +256,18 @@ def run_check(dt):
         if t >= SHIP_SHOT_WALK + 1.0:
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_ship" + ext)
-            player.heading = state["ship"][3]
+            player.heading = state.site.ship[3]
             player.pitch = 0.0
             check["stage"], check["time"] = "walk", 0.0
             check["start"] = foot.bubble.to_world(player.feet())
     elif stage == "walk":
         foot.controls.forward = 1.0
-        if args.shot and t >= SHOT_SECONDS and not state["shot"]:
-            state["shot"] = True
+        if args.shot and t >= SHOT_SECONDS and not state.session.shot:
+            state.session.shot = True
             walking.screenshot(args.shot)
         if t >= 0.5 * CHECK_SECONDS and "capture" not in check:
             check["capture"] = walking.take_capture(CHECK_CAPTURES)
-        if any(toast[0].startswith("Screenshot saved") for toast in state["hud"].toasts):
+        if any(toast[0].startswith("Screenshot saved") for toast in state.ui.hud.toasts):
             check["capture_toast"] = True
         if t >= CHECK_SECONDS:
             foot.controls.forward = 0.0
@@ -276,7 +276,7 @@ def run_check(dt):
             print("[walker] walked %.1f m in %.0f s, on the ground: %s: %s"
                   % (moved, t, player.on_ground, "passed" if check["walk_ok"] else "FAILED"), flush=True)
             capture = check["capture"]
-            check["capture_ok"] = (capture is not None and os.path.exists(capture) and state["capture_toast"] is None
+            check["capture_ok"] = (capture is not None and os.path.exists(capture) and state.view.capture_toast is None
                                    and check.get("capture_toast", False))
             print("[walker] a screenshot taken as P takes one, and its toast shown: %s"
                   % ("passed" if check["capture_ok"] else "FAILED"), flush=True)
@@ -327,14 +327,14 @@ def run_check(dt):
                   % (100.0 * check["charge"], last[1] if last is not None and last[1] else 0.0,
                      "passed" if punt_ok else "FAILED"), flush=True)
             check["punt_ok"] = punt_ok
-            state["slate"].open("Map")
+            state.ui.slate.open("Map")
             check["stage"], check["time"] = "map", 0.0
     elif stage == "map":
         if t >= MAP_SECONDS:
             apps_map.waypoint_offset(MAP_WAYPOINT[0], MAP_WAYPOINT[1])
             body = foot.bubble.body
-            cells = state["map"].grids[body.name].measured
-            waypoint = state["waypoint"]
+            cells = state.ui.map.grids[body.name].measured
+            waypoint = state.progress.waypoint
             map_ok = cells >= MAP_CELLS and waypoint is not None and waypoint[0] is body
             check["stage"], check["time"] = "map shown", 0.0
             check["map_ok"] = map_ok
@@ -345,27 +345,27 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_map" + ext)
-            state["slate"].close(at_once=True)
+            state.ui.slate.close(at_once=True)
             check["stage"], check["time"] = "suit", 0.0
     elif stage == "suit":
         if "suit" not in check:
             here = survival.here_temperature()
-            check["suit"] = {"temperature": state["temperature"], "here": here, "rows": [r[0] for r in survival.suit_rows()],
-                             "credits": state["market"].credits, "woken": state["woken"],
+            check["suit"] = {"temperature": state.suit.temperature, "here": here, "rows": [r[0] for r in survival.suit_rows()],
+                             "credits": state.economy.market.credits, "woken": state.suit.woken,
                              "functions": (survival.here_temperature, economy.at_outpost)}
             survival.here_temperature = lambda: SUIT_CHECK_TEMPERATURE
             economy.at_outpost = lambda: None
-            state["suit"].reserve, state["suit"].health = SUIT_CHECK_RESERVE, SUIT_CHECK_HEALTH
+            state.suit.state.reserve, state.suit.state.health = SUIT_CHECK_RESERVE, SUIT_CHECK_HEALTH
             return
         s = check["suit"]
-        if state["woken"] == s["woken"]:
+        if state.suit.woken == s["woken"]:
             if t > SUIT_SECONDS:
                 print("[walker] the suit did not give out in %.0f s at %.0f C: FAILED" % (t, SUIT_CHECK_TEMPERATURE),
                       flush=True)
                 os._exit(1)
-            if "slow" not in s and state["suit"].reserve < suit.SLOW_BELOW and state["suit"].reserve > 0.0:
+            if "slow" not in s and state.suit.state.reserve < suit.SLOW_BELOW and state.suit.state.reserve > 0.0:
                 s["slow"] = survival.suit_effects()
-            if args.shot and "shot" not in s and 0.0 < state["suit"].reserve < 0.1:
+            if args.shot and "shot" not in s and 0.0 < state.suit.state.reserve < 0.1:
                 s["shot"] = True
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_suit" + ext)
@@ -377,12 +377,12 @@ def run_check(dt):
                 os._exit(1)
             return
         outpost = economy.at_outpost()
-        fee = s["credits"] - state["market"].credits
+        fee = s["credits"] - state.economy.market.credits
         tint, factor = s.get("slow", (None, 1.0))
         suit_ok = (s["temperature"] is not None and abs(s["temperature"] - s["here"]) < 1e-6
-                   and s["rows"] == ["Suit", "Temp"] and outpost is state["home"]
+                   and s["rows"] == ["Suit", "Temp"] and outpost is state.site.home
                    and abs(fee - min(RECOVERY_FEE, s["credits"])) < 1e-6
-                   and state["suit"].reserve == state["suit_params"].reserve and state["suit"].health == 1.0
+                   and state.suit.state.reserve == state.suit.params.reserve and state.suit.state.health == 1.0
                    and factor == suit.SLOW_FACTOR and tint is not None and tint[1] > 0.0)
         print("[walker] %.1f C here; at %.0f C the suit ran low (the walk x%.1f, a tint of %.2f), gave out, and the "
               "player came to at %s for %.0f cr, the suit full: %s"
@@ -391,7 +391,7 @@ def run_check(dt):
                  "passed" if suit_ok else "FAILED"), flush=True)
         check["suit_ok"] = suit_ok
         _, up, _, _ = world.site_frame()
-        check["credits"] = state["market"].credits
+        check["credits"] = state.economy.market.credits
         check["ore"] = walking.ore_rock(add(world.site_ground(), scale(up, 1.0)), CHECK_ORE_EXTENT, CHECK_ORE_GRADE)
         check["stage"], check["time"] = "sell", 0.0
     elif stage == "sell":
@@ -399,10 +399,10 @@ def run_check(dt):
         if sold and "sold_at" not in check:
             check["sold_at"] = t
         if t >= check.get("sold_at", SELL_SECONDS) + 1.0 or t >= SELL_SECONDS + 1.0:   # the toast drawn first
-            gained = state["market"].credits - check["credits"]
-            sell_ok = sold and gained > 0.0 and state["sold_kg"] > 0.0
+            gained = state.economy.market.credits - check["credits"]
+            sell_ok = sold and gained > 0.0 and state.economy.sold_kg > 0.0
             print("[walker] ore dropped on the Base pad sold: %.0f kg for %.0f cr: %s"
-                  % (state["sold_kg"], gained, "passed" if sell_ok else "FAILED"), flush=True)
+                  % (state.economy.sold_kg, gained, "passed" if sell_ok else "FAILED"), flush=True)
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_sell" + ext)
@@ -410,7 +410,7 @@ def run_check(dt):
             check["stage"], check["time"] = "net", 0.0
     elif stage == "net":
         if "net_rocks" not in check:
-            car = state["car"]
+            car = state.vehicle.car
             check["parked_at"] = car.position          # on Base's pad, where ore resting sells by itself
             car.position = add(car.position, scale(car.heading, NET_CHECK_AWAY))
             vehicle.update_ship()
@@ -422,9 +422,9 @@ def run_check(dt):
         if t >= NET_SETTLE:
             rocks = check["net_rocks"]
             masses = sorted(round(r.mass, 3) for r in rocks)
-            credits = state["market"].credits
+            credits = state.economy.market.credits
             vehicle.enter_car(anywhere=True)
-            car = state["car"]
+            car = state.vehicle.car
             car.position = check["parked_at"]
             vehicle.update_ship()
             outpost = economy.car_outpost()
@@ -432,7 +432,7 @@ def run_check(dt):
                       and sorted(round(c["mass"], 3) for c in car.cargo) == masses)
             expected = trade.sale(outpost, car.cargo, world.time)[0] if outpost is not None and car.cargo else 0.0
             economy.sell_car_cargo()
-            gained = state["market"].credits - credits
+            gained = state.economy.market.credits - credits
             net_ok = loaded and outpost is not None and not car.cargo and expected > 0.0 and abs(gained - expected) < 1e-6
             print("[walker] %d ore rocks in the car's net loaded on getting in (%s kg) and sold at %s for %.0f cr "
                   "(expected %.0f): %s" % (len(rocks), ", ".join("%.0f" % m for m in masses),
@@ -441,7 +441,7 @@ def run_check(dt):
             check["sell_ok"] = check["sell_ok"] and net_ok
             check["stage"], check["time"] = "net_out", 0.0
     elif stage == "net_out":
-        state["car_controls"] = hovercar.CarControls()
+        state.vehicle.controls = hovercar.CarControls()
         if foot.player is None and not vehicle.leave_car():
             if t > LAND_SECONDS:
                 print("[walker] could not get out of the car back on Base's pad: FAILED", flush=True)
@@ -450,22 +450,22 @@ def run_check(dt):
         check["stage"], check["time"] = "upgrades", 0.0
     elif stage == "upgrades":
         if "bought" not in check:
-            state["market"].credits += UPGRADE_CREDITS
-            credits = state["market"].credits
+            state.economy.market.credits += UPGRADE_CREDITS
+            credits = state.economy.market.credits
             engine = upgrades.BY_KEY["engine_1"]
             economy.buy_upgrade(engine)
-            refused = "engine_1" not in state["owned"] and state["market"].credits == credits
+            refused = "engine_1" not in state.economy.owned and state.economy.market.credits == credits
             for key in UPGRADE_BUYS:
                 economy.buy_upgrade(upgrades.BY_KEY[key])
-            spent = credits - state["market"].credits
+            spent = credits - state.economy.market.credits
             base_car, base_gun = hovercar.CarParams(), GunParams()
-            car, gun = state["car"].params, foot.gun.p
-            check["bought"] = (refused and state["owned"] == set(UPGRADE_BUYS)
+            car, gun = state.vehicle.car.params, foot.gun.p
+            check["bought"] = (refused and state.economy.owned == set(UPGRADE_BUYS)
                                and abs(spent - sum(upgrades.BY_KEY[k].cost for k in UPGRADE_BUYS)) < 1e-6
                                and abs(car.fuel_capacity - 1.5 * base_car.fuel_capacity) < 1e-9
                                and abs(car.cargo_capacity - 1.5 * base_car.cargo_capacity) < 1e-9
                                and abs(gun.hold_force - 1.5 * base_gun.hold_force) < 1e-9
-                               and foot.gun_params is state["params"]["gun"])
+                               and foot.gun_params is state.economy.params["gun"])
             print("[walker] at %s: Main engine tuning refused first (%s); bought %s for %.0f cr: the car's tank "
                   "%.0f kg and hold %.2f t, the gun %.1f kN: %s"
                   % (economy.at_outpost().name if economy.at_outpost() is not None else "no outpost",
@@ -474,13 +474,13 @@ def run_check(dt):
                      "passed" if check["bought"] else "FAILED"), flush=True)
             check["sell_ok"] = check["sell_ok"] and check["bought"]
             if args.shot:
-                state["slate"].open("Workshop")
+                state.ui.slate.open("Workshop")
             return
         if t >= 0.5 or not args.shot:
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_upgrades" + ext)
-                state["slate"].close(at_once=True)
+                state.ui.slate.close(at_once=True)
             check["stage"], check["time"] = "pois", 0.0
     elif stage == "pois":
         if run_poi_check(check, t):
@@ -506,7 +506,7 @@ def run_check(dt):
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_pause" + ext)
                 menus.set_paused(False)
-                state["slate"].open("Vehicle")
+                state.ui.slate.open("Vehicle")
             check["pause_ok"] = pause_ok
             check["stage"], check["time"] = "car_tab", 0.0
     elif stage == "car_tab":
@@ -514,28 +514,28 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_car" + ext)
-                state["slate"].open("Market")
+                state.ui.slate.open("Market")
             check["stage"], check["time"] = "outpost_tab", 0.0
     elif stage == "outpost_tab":
         if t >= 0.5 or not args.shot:
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_outpost" + ext)
-                state["slate"].open("Contracts")
+                state.ui.slate.open("Contracts")
             check["stage"], check["time"] = "contracts_tab", 0.0
     elif stage == "contracts_tab":
         if t >= 0.5 or not args.shot:
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_contracts" + ext)
-                state["slate"].open("Overview")
+                state.ui.slate.open("Overview")
             check["stage"], check["time"] = "overview_tab", 0.0
     elif stage == "overview_tab":
         if t >= 0.5 or not args.shot:
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_overview" + ext)
-                state["slate"].open("Log")
+                state.ui.slate.open("Log")
             check["stage"], check["time"] = "log_tab", 0.0
     elif stage == "log_tab":
         if t >= 0.5 or not args.shot:
@@ -549,7 +549,7 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_settings" + ext)
-                state["system"].show(True, "Controls")
+                state.ui.system.show(True, "Controls")
                 check["stage"], check["time"] = "controls", 0.0
                 return
             check["stage"] = "controls"
@@ -560,17 +560,17 @@ def run_check(dt):
                 walking.screenshot(base + "_controls" + ext)
             menus.set_paused(False)
             saved = saving.save_game(CHECK_SAVE_BASE)
-            check["saved"] = {"credits": state["market"].credits, "cells": walking.game_numbers()["cells"],
-                              "props": len(foot.props.all), "sold_kg": state["sold_kg"],
+            check["saved"] = {"credits": state.economy.market.credits, "cells": walking.game_numbers()["cells"],
+                              "props": len(foot.props.all), "sold_kg": state.economy.sold_kg,
                               "feet": foot.bubble.to_world(player.feet()), "time": saved["time"],
-                              "contracts": [(c.id, c.kind, c.state) for c in state["contracts"]],
-                              "pinned": state["pinned"], "reputation": dict(state["reputation"]),
-                              "craters": list(world.craters), "hot": sorted(state["hot"].values())}
-            state["market"].credits += 999.0
-            state["sold_kg"] += 99.0
-            state["map"].grids = {}
-            state["contracts"], state["pinned"], state["reputation"] = [], None, {}
-            state["craters"], state["hot"] = [], {}
+                              "contracts": [(c.id, c.kind, c.state) for c in state.contracts.active],
+                              "pinned": state.contracts.pinned, "reputation": dict(state.contracts.reputation),
+                              "craters": list(world.craters), "hot": sorted(state.showers.hot.values())}
+            state.economy.market.credits += 999.0
+            state.economy.sold_kg += 99.0
+            state.ui.map.grids = {}
+            state.contracts.active, state.contracts.pinned, state.contracts.reputation = [], None, {}
+            state.showers.craters, state.showers.hot = [], {}
             world.set_craters([])
             check["loaded"] = saving.load_game(CHECK_SAVE_BASE)
             check["stage"], check["time"] = "reload", 0.0
@@ -584,17 +584,17 @@ def run_check(dt):
         if t - check["back"] >= 1.0:
             saved = check["saved"]
             moved = length(sub(foot.bubble.to_world(player.feet()), saved["feet"]))
-            load_ok = (check["loaded"] and state["market"].credits == saved["credits"]
-                       and state["sold_kg"] == saved["sold_kg"] and walking.game_numbers()["cells"] == saved["cells"]
+            load_ok = (check["loaded"] and state.economy.market.credits == saved["credits"]
+                       and state.economy.sold_kg == saved["sold_kg"] and walking.game_numbers()["cells"] == saved["cells"]
                        and len(foot.props.all) == saved["props"] and moved < 2.0
-                       and [(c.id, c.kind, c.state) for c in state["contracts"]] == saved["contracts"]
-                       and state["pinned"] == saved["pinned"] and state["reputation"] == saved["reputation"]
-                       and list(world.craters) == saved["craters"] and sorted(state["hot"].values()) == saved["hot"])
+                       and [(c.id, c.kind, c.state) for c in state.contracts.active] == saved["contracts"]
+                       and state.contracts.pinned == saved["pinned"] and state.contracts.reputation == saved["reputation"]
+                       and list(world.craters) == saved["craters"] and sorted(state.showers.hot.values()) == saved["hot"])
             print("[walker] saved, changed and loaded: %.0f cr, %d cells, %d props, %d contract%s, %d crater%s, "
                   "%d hot, the player %.2f m from where it was saved: %s"
-                  % (state["market"].credits, walking.game_numbers()["cells"], len(foot.props.all), len(state["contracts"]),
-                     "" if len(state["contracts"]) == 1 else "s", len(world.craters),
-                     "" if len(world.craters) == 1 else "s", len(state["hot"]), moved,
+                  % (state.economy.market.credits, walking.game_numbers()["cells"], len(foot.props.all), len(state.contracts.active),
+                     "" if len(state.contracts.active) == 1 else "s", len(world.craters),
+                     "" if len(world.craters) == 1 else "s", len(state.showers.hot), moved,
                      "passed" if load_ok else "FAILED"),
                   flush=True)
             if args.shot:
@@ -607,11 +607,11 @@ def run_check(dt):
             check["top_speed"], check["top_height"] = 0.0, 0.0
             check["stage"], check["time"] = "drive", 0.0
     elif stage in ("drive", "fly", "land"):
-        car = state["car"]
+        car = state.vehicle.car
         check["top_speed"] = max(check["top_speed"], car.speed())
         check["top_height"] = max(check["top_height"], car.height or 0.0)
         if stage == "drive":
-            state["car_controls"] = hovercar.CarControls(throttle=1.0, steer=0.25)
+            state.vehicle.controls = hovercar.CarControls(throttle=1.0, steer=0.25)
             if args.shot and t >= DRIVE_SECONDS - 1.0 and "drive_shot" not in check:
                 check["drive_shot"] = True
                 base, ext = os.path.splitext(args.shot)
@@ -619,23 +619,23 @@ def run_check(dt):
             if t >= DRIVE_SECONDS:
                 check["stage"], check["time"] = "fly", 0.0
         elif stage == "fly":
-            state["car_controls"] = hovercar.CarControls(throttle=0.6, climb=1.0 if t < CLIMB_SECONDS else 0.0)
+            state.vehicle.controls = hovercar.CarControls(throttle=0.6, climb=1.0 if t < CLIMB_SECONDS else 0.0)
             if t >= CLIMB_SECONDS + 2.0:
                 if args.shot:
                     base, ext = os.path.splitext(args.shot)
                     walking.screenshot(base + "_fly" + ext)
                 saving.save_game(CHECK_SAVE_BASE, quiet=True)
                 saved_at = vehicle.car_position()
-                state["car"].target = hovercar.HOVER_MIN
+                state.vehicle.car.target = hovercar.HOVER_MIN
                 loaded = saving.load_game(CHECK_SAVE_BASE)
                 moved = length(sub(vehicle.car_position(), saved_at))
-                check["flight_load_ok"] = loaded and state["driving"] and moved < 0.01 and state["car"].target > 10.0
+                check["flight_load_ok"] = loaded and state.vehicle.driving and moved < 0.01 and state.vehicle.car.target > 10.0
                 print("[walker] saved and loaded in flight: driving %s, the car %.3f m from where it was saved: %s"
-                      % (state["driving"], moved, "passed" if check["flight_load_ok"] else "FAILED"), flush=True)
+                      % (state.vehicle.driving, moved, "passed" if check["flight_load_ok"] else "FAILED"), flush=True)
                 check["stage"], check["time"] = "land", 0.0
         else:
             moving = car.speed() > 1.0
-            state["car_controls"] = hovercar.CarControls(throttle=-1.0 if moving and dot(car.velocity, car.heading) > 0.0
+            state.vehicle.controls = hovercar.CarControls(throttle=-1.0 if moving and dot(car.velocity, car.heading) > 0.0
                                                          else 0.0, climb=-1.0)
             if car.can_leave() or t >= LAND_SECONDS:
                 left = vehicle.leave_car()
@@ -644,7 +644,7 @@ def run_check(dt):
         if t >= 1.0:
             drive_ok = (check["in_car"] and check["flight_load_ok"] and check["top_speed"] > 30.0
                         and check["top_height"] > 0.8 * CLIMB_SECONDS * hovercar.CLIMB_RATE
-                        and check["left"] and player is not None and not state["driving"])
+                        and check["left"] and player is not None and not state.vehicle.driving)
             print("[walker] drove the car to %.0f km/h, flew it %.0f m up, came down and got out: %s"
                   % (3.6 * check["top_speed"], check["top_height"], "passed" if drive_ok else "FAILED"), flush=True)
             if args.shot:
@@ -655,8 +655,8 @@ def run_check(dt):
                 print("[walker] no lakes were found: FAILED", flush=True)
                 os._exit(1)
             check["in_car"] = vehicle.enter_car(anywhere=True)
-            lake = min(world.lakes, key=lambda k: -dot(normalize(k.direction), normalize(state["car"].position)))
-            car = state["car"]
+            lake = min(world.lakes, key=lambda k: -dot(normalize(k.direction), normalize(state.vehicle.car.position)))
+            car = state.vehicle.car
             car.position = scale(normalize(lake.direction), planet.radius + lake.level + LAKE_CHECK_DROP)
             car.velocity = (0.0, 0.0, 0.0)
             car.heading = car._level(car.heading)
@@ -664,9 +664,9 @@ def run_check(dt):
             check["lake"] = lake
             check["stage"], check["time"] = "lake", 0.0
     elif stage == "lake":
-        state["car_controls"] = hovercar.CarControls()
+        state.vehicle.controls = hovercar.CarControls()
         if t >= LAKE_SECONDS:
-            car, lake = state["car"], check["lake"]
+            car, lake = state.vehicle.car, check["lake"]
             above_water = length(car.position) - planet.radius - lake.level - SHIP_HALF[1]
             bed = world.ground
             lake_ok = (check["in_car"] and car.height is not None and abs(car.height - hovercar.HOVER_MIN) < 0.25
@@ -680,7 +680,7 @@ def run_check(dt):
                 walking.screenshot(base + "_lake" + ext)
             check["stage"], check["time"] = "lake_above" if args.shot else "to_river", 0.0
     elif stage == "lake_above":
-        state["car_controls"] = hovercar.CarControls(climb=1.0 if t < LAKE_CLIMB_SECONDS else 0.0)
+        state.vehicle.controls = hovercar.CarControls(climb=1.0 if t < LAKE_CLIMB_SECONDS else 0.0)
         if t >= LAKE_CLIMB_SECONDS + 2.0:
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_lake_above" + ext)
@@ -690,7 +690,7 @@ def run_check(dt):
         if river is None:
             print("[walker] no river at least %.0f m wide was found: FAILED" % RIVER_CHECK_WIDTH, flush=True)
             os._exit(1)
-        car = state["car"]
+        car = state.vehicle.car
         car.position = scale(normalize(river.points[k]), planet.radius + river.levels[k] + LAKE_CHECK_DROP)
         car.velocity = (0.0, 0.0, 0.0)
         car.heading = car._level(sub(river.points[k + 1], river.points[k]))
@@ -698,9 +698,9 @@ def run_check(dt):
         check["river"] = (river, k)
         check["stage"], check["time"] = "river", 0.0
     elif stage == "river":
-        state["car_controls"] = hovercar.CarControls()
+        state.vehicle.controls = hovercar.CarControls()
         if t >= LAKE_SECONDS:
-            car = state["car"]
+            car = state.vehicle.car
             river, k = check["river"]
             level = world.water_level(normalize(car.position))
             above_water = None if level is None else length(car.position) - planet.radius - level - SHIP_HALF[1]
@@ -717,15 +717,15 @@ def run_check(dt):
             walking.screenshot(base + "_river" + ext)
             check["stage"], check["time"] = "river_above", 0.0
     elif stage == "river_above":
-        state["car_controls"] = hovercar.CarControls(climb=1.0 if t < RIVER_CLIMB_SECONDS else 0.0)
+        state.vehicle.controls = hovercar.CarControls(climb=1.0 if t < RIVER_CLIMB_SECONDS else 0.0)
         if t >= RIVER_CLIMB_SECONDS + 2.0:
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_river_above" + ext)
             check["stage"], check["time"] = "fuel", 0.0
     elif stage == "fuel":
-        car = state["car"]
+        car = state.vehicle.car
         if "dry_from" not in check:
-            state["car_controls"] = hovercar.CarControls(climb=-1.0)
+            state.vehicle.controls = hovercar.CarControls(climb=-1.0)
             if car.height is None or car.height > hovercar.LEAVE_HEIGHT or car.speed() > 0.3:
                 if t > LAND_SECONDS:
                     print("[walker] the car did not come down to call fuel: FAILED", flush=True)
@@ -736,23 +736,23 @@ def run_check(dt):
             check["time"] = 0.0
             return
         if "call" not in check:
-            state["car_controls"] = hovercar.CarControls(throttle=1.0)        # dry: it must not drive
+            state.vehicle.controls = hovercar.CarControls(throttle=1.0)        # dry: it must not drive
             if t >= DRY_SECONDS:
-                state["car_controls"] = hovercar.CarControls()
+                state.vehicle.controls = hovercar.CarControls()
                 check["dry_moved"] = length(sub(car.position, check["dry_from"]))
-                check["credits_before"] = state["market"].credits
+                check["credits_before"] = state.economy.market.credits
                 economy.call_fuel()
-                check["call"] = state["fuel_call"]
+                check["call"] = state.vehicle.fuel_call
                 if check["call"] is None:
-                    print("[walker] no fuel call could be made (%s): FAILED" % state["car_note"], flush=True)
+                    print("[walker] no fuel call could be made (%s): FAILED" % state.vehicle.note, flush=True)
                     os._exit(1)
             return
-        state["car_controls"] = hovercar.CarControls()
+        state.vehicle.controls = hovercar.CarControls()
         call = check["call"]
-        if state["fuel_call"] is None or world.time > call["due"] + FUEL_WAIT:
+        if state.vehicle.fuel_call is None or world.time > call["due"] + FUEL_WAIT:
             kg = min(car.params.fuel_capacity, (check["credits_before"] - call["fee"]) / call["price"])
-            spent = check["credits_before"] - state["market"].credits
-            fuel_ok = (check["dry_moved"] < 1.0 and state["fuel_call"] is None and abs(car.fuel - kg) < 1e-6
+            spent = check["credits_before"] - state.economy.market.credits
+            fuel_ok = (check["dry_moved"] < 1.0 and state.vehicle.fuel_call is None and abs(car.fuel - kg) < 1e-6
                        and abs(spent - (call["fee"] + kg * call["price"])) < 1e-6)
             print("[walker] the car dry moved %.2f m at full throttle; fuel called from %s (%.2f cr/kg, a %.0f cr "
                   "fee) came: %.1f kg for %.0f cr: %s"
@@ -765,10 +765,10 @@ def run_check(dt):
             check["ok"] = check["ok"] and check["space_ok"]
             check["stage"], check["time"] = "night", 0.0
     elif stage == "night":
-        state["car_controls"] = hovercar.CarControls()
+        state.vehicle.controls = hovercar.CarControls()
         if "hour" not in check:
             check["hour"] = clock.hour(survival.day_time())
-            state["day_offset"] = clock.time_of(NIGHT_CHECK_HOUR, survival.day_time()) - world.time
+            state.session.day_offset = clock.time_of(NIGHT_CHECK_HOUR, survival.day_time()) - world.time
         if t >= NIGHT_SECONDS:
             night_ok = (abs(world.exposure_scale - clock.NIGHT_SCALE) < 1e-6 and world.lights_drawn >= 2
                         and abs(clock.hour(survival.day_time()) - NIGHT_CHECK_HOUR) < 0.1)
@@ -796,7 +796,7 @@ def check_poi(kind, n, from_feet=None):
     key = (planet.index, -1, n, 0)
     poi = pois.Poi(key, normalize(relative), 0.0, measured=True, height=length(relative) - planet.radius,
                    climate=(10.0, 0.5), ore=0.5, resource=resources.QUARTZ, kind=kind, valid=True)
-    state["pois"].pois[key] = poi
+    state.exploring.pois.pois[key] = poi
     return poi
 
 
@@ -808,13 +808,13 @@ def run_poi_check(check, t):
                                  "props": {id(p) for p in foot.props.all}})
     if c["step"] >= len(steps):
         # The test's points (off the faces) and the props they made taken away again.
-        for key in [k for k in state["pois"].pois if k[1] < 0]:
-            del state["pois"].pois[key]
-            for entity, _ in state["poi_scenes"].pop(key, []):
+        for key in [k for k in state.exploring.pois.pois if k[1] < 0]:
+            del state.exploring.pois.pois[key]
+            for entity, _ in state.exploring.scenes.pop(key, []):
                 engine.scene.destroy_entity(entity)
         for prop in [p for p in foot.props.all if id(p) not in c["props"]]:
             foot.props.remove(foot.bubble, prop)
-        state["poi_cleared"] = None
+        state.exploring.cleared = None
         print("[walker] points of interest:\n" + "\n".join("[walker]   " + line for line in c["lines"])
               + "\n[walker]   %s" % ("passed" if c["ok"] else "FAILED"), flush=True)
         check["sell_ok"] = check["sell_ok"] and c["ok"]
@@ -827,9 +827,9 @@ def run_poi_check(check, t):
         c["step"] += 1
         c["t0"] = t
         c.pop("poi", None)
-        state["check_use"] = False
+        state.session.check_use = False
 
-    p = state["pois"]
+    p = state.exploring.pois
     if step == "natural":
         near = [q for q in p.pois.values() if q.key[1] >= 0]
         if p.queue and since < POI_MEASURE_SECONDS:
@@ -840,28 +840,28 @@ def run_poi_check(check, t):
     elif step in ("beacon", "wreck", "rig", "arch"):
         if "poi" not in c:
             c["poi"] = check_poi(step, c["step"])
-            c["before"] = (state["survey_data"], dict(state["parts"]), len(foot.props.rocks), len(state["map"].revealing))
+            c["before"] = (state.economy.survey_data, dict(state.economy.parts), len(foot.props.rocks), len(state.ui.map.revealing))
             return False
         poi = c["poi"]
-        state["check_use"] = True
+        state.session.check_use = True
         hold = pois.SPOTS[step][0][2]
         if 0 not in poi.done and since < hold + USE_CHECK_SECONDS:
             return False
         survey, parts, rocks, revealing = c["before"]
-        gained = state["survey_data"] - survey
-        new_parts = {k: v - parts.get(k, 0) for k, v in state["parts"].items() if v != parts.get(k, 0)}
+        gained = state.economy.survey_data - survey
+        new_parts = {k: v - parts.get(k, 0) for k, v in state.economy.parts.items() if v != parts.get(k, 0)}
         ok = 0 in poi.done and poi.discovered
         if step in ("beacon", "arch"):
             ok = ok and abs(gained - pois.survey_value(poi)) < 1e-6
             if step == "beacon":
-                ok = ok and len(state["map"].revealing) > revealing
+                ok = ok and len(state.ui.map.revealing) > revealing
         else:
             ok = ok and sum(new_parts.values()) == 1 and since >= hold
             if step == "rig":
                 ok = ok and len(foot.props.rocks) == rocks + pois.RIG_ROCKS
         extra = ""
         if step == "beacon":
-            extra = ", %d map cells queued" % (len(state["map"].revealing) - revealing)
+            extra = ", %d map cells queued" % (len(state.ui.map.revealing) - revealing)
         elif step == "rig":
             extra = ", %d ore rocks more" % (len(foot.props.rocks) - rocks)
         done(ok, "%s used after %.1f s: survey data +%.0f cr, parts %s%s"
@@ -881,32 +881,32 @@ def run_poi_check(check, t):
     elif step == "pod":
         if "poi" not in c:
             c["poi"] = check_poi("pod", c["step"], from_feet=(6.0, 0.0))
-            c["sold"] = state["pods_sold"]
+            c["sold"] = state.exploring.pods_sold
             return False
         poi = c["poi"]
         if not poi.looted and since < POD_CHECK_SECONDS:
             return False
-        done(poi.looted and state["pods_sold"] == c["sold"] + 1,
+        done(poi.looted and state.exploring.pods_sold == c["sold"] + 1,
              "cargo pod made on Base's pad, at rest sold for %.0f cr after %.1f s" % (pois.POD_VALUE, since))
     elif step == "survey":
-        held, credits = state["survey_data"], state["market"].credits
+        held, credits = state.economy.survey_data, state.economy.market.credits
         outpost = economy.at_outpost()
         expected = trade.survey_sale(outpost, held, world.time)[0] if outpost is not None else 0.0
         economy.sell_survey()
-        gained = state["market"].credits - credits
-        done(outpost is not None and held > 0.0 and state["survey_data"] == 0.0 and abs(gained - expected) < 1e-6,
+        gained = state.economy.market.credits - credits
+        done(outpost is not None and held > 0.0 and state.economy.survey_data == 0.0 and abs(gained - expected) < 1e-6,
              "survey data worth %.0f cr sold at %s for %.0f cr" % (held, outpost.name if outpost else "-", gained))
     elif step == "buy":
         bank, liner = upgrades.BY_KEY["gun_charge_1"], upgrades.BY_KEY["suit_1"]
-        coils = state["parts"].get("coil", 0)
-        cold = state["suit_params"].cold_limit
+        coils = state.economy.parts.get("coil", 0)
+        cold = state.suit.params.cold_limit
         economy.buy_upgrade(bank)
-        bank_ok = ("gun_charge_1" in state["owned"]) == (coils >= 1)
+        bank_ok = ("gun_charge_1" in state.economy.owned) == (coils >= 1)
         economy.buy_upgrade(liner)
-        liner_ok = "suit_1" in state["owned"] and abs(state["suit_params"].cold_limit - (cold - 10.0)) < 1e-9
+        liner_ok = "suit_1" in state.economy.owned and abs(state.suit.params.cold_limit - (cold - 10.0)) < 1e-9
         done(bank_ok and liner_ok, "Capacitor bank with %d coil%s: %s; Thermal liner: the suit's cold limit %.0f C"
-             % (coils, "" if coils == 1 else "s", "bought" if "gun_charge_1" in state["owned"] else "refused",
-                state["suit_params"].cold_limit))
+             % (coils, "" if coils == 1 else "s", "bought" if "gun_charge_1" in state.economy.owned else "refused",
+                state.suit.params.cold_limit))
     return False
 
 
@@ -916,9 +916,9 @@ def run_contract_check(check, t):
     made for the step (check_contract) and accepted there."""
     steps = ["offers", "delivery", "courier", "fragile", "recovery", "survey", "expire", "abandon", "keep"]
     c = check.setdefault("contracts", {"step": 0, "t0": t, "lines": [], "ok": True})
-    home, car = state["home"], state["car"]
+    home, car = state.site.home, state.vehicle.car
     if c["step"] >= len(steps):
-        rep = state["reputation"].get(home.name, 0.0)
+        rep = state.contracts.reputation.get(home.name, 0.0)
         ok = c["ok"] and rep == 1.0 and home.reputation == 1.0
         print("[walker] contracts:\n" + "\n".join("[walker]   " + line for line in c["lines"])
               + "\n[walker]   Base's reputation %+.0f, its prices x%.2f: %s"
@@ -936,15 +936,15 @@ def run_contract_check(check, t):
 
     def begin(contract):
         c["contract"] = contract
-        c["before"] = (state["market"].credits, state["reputation"].get(home.name, 0.0), state["sold_kg"])
+        c["before"] = (state.economy.market.credits, state.contracts.reputation.get(home.name, 0.0), state.economy.sold_kg)
         return contracting.accept_contract(contract)
 
     def ended(contract, how):
         credits, rep, _ = c["before"]
-        paid = state["market"].credits - credits
-        return (contract.state == how and contract not in state["contracts"]
+        paid = state.economy.market.credits - credits
+        return (contract.state == how and contract not in state.contracts.active
                 and abs(paid - (contract.reward if how == "completed" else 0.0)) < 1e-6
-                and state["reputation"].get(home.name, 0.0) == rep + (1.0 if how == "completed" else -1.0))
+                and state.contracts.reputation.get(home.name, 0.0) == rep + (1.0 if how == "completed" else -1.0))
 
     feet = foot.bubble.to_world(foot.player.feet())
     up = normalize(planet.relative(feet))
@@ -965,7 +965,7 @@ def run_contract_check(check, t):
         contract = c["contract"]
         if contract.state == "active" and since < CONTRACT_CHECK_SECONDS:
             return False
-        done(ended(contract, "completed") and c["rock"] not in foot.props.rocks and state["sold_kg"] == c["before"][2],
+        done(ended(contract, "completed") and c["rock"] not in foot.props.rocks and state.economy.sold_kg == c["before"][2],
              "delivery of %.0f kg of ferrite: the rock on the pad delivered, not sold, after %.1f s, +%.0f cr"
              % (contract.quantity, since, contract.reward))
     elif step == "courier":
@@ -988,7 +988,7 @@ def run_contract_check(check, t):
             begin(check_contract("courier", c["step"], destination="Elsewhere"))
             return False
         contract = c["contract"]
-        crate = next((p for p in foot.props.crates if state["couriers"].get(id(p)) == contract.id), None)
+        crate = next((p for p in foot.props.crates if state.contracts.couriers.get(id(p)) == contract.id), None)
         if "thrown" not in c and crate is not None and crate.body is not None and since >= 0.5:
             p, q = foot.physics.get_transform(crate.body)
             lift = foot.bubble.up(p)
@@ -1009,12 +1009,12 @@ def run_contract_check(check, t):
         contract = c["contract"]
         if contract.state == "active" and since < CONTRACT_CHECK_SECONDS:
             return False
-        done(ended(contract, "completed") and contracting.pod_key(contract) not in state["pois"].pois,
+        done(ended(contract, "completed") and contracting.pod_key(contract) not in state.exploring.pois.pois,
              "recovery: the pod made at its point on the pad and, settled, delivered after %.1f s" % since)
     elif step == "survey":
         if "contract" not in c:
             begin(check_contract("survey", c["step"], target=up))
-            c["queued"] = state["map"].reveal(planet, up, contracts.SURVEY_RADIUS)
+            c["queued"] = state.ui.map.reveal(planet, up, contracts.SURVEY_RADIUS)
             return False
         contract = c["contract"]
         if contract.state == "active" and since < CONTRACT_CHECK_SECONDS:
@@ -1045,9 +1045,9 @@ def run_contract_check(check, t):
         contract = c["contract"]
         if since < 0.5:
             return False
-        card = state["hud"].card
+        card = state.ui.hud.card
         marked = any(name == "Contract" for name, _, _ in walking.markers(planet))
-        done(contract in state["contracts"] and state["pinned"] == contract.id and card[0].startswith("Pinned")
+        done(contract in state.contracts.active and state.contracts.pinned == contract.id and card[0].startswith("Pinned")
              and card[1] == contracts.short_task(contract) and marked,
              "a survey 2 km off kept active and pinned: on the card (%s) and the compass" % card[0])
     return False
@@ -1062,7 +1062,7 @@ def run_shower_check(check, t):
         feet = foot.bubble.to_world(player.feet())
         here = normalize(planet.relative(feet))
         centre = events.along_ground(here, 90.0, SHOWER_CHECK_CENTRE, planet.radius)
-        pad = state["home"].direction
+        pad = state.site.home.direction
         out = bearing(pad, sub(here, pad))
         if out is None or events.ground_distance(pad, here, planet.radius) < 1.0:
             out = bearing(here, player.heading) or 0.0
@@ -1071,27 +1071,27 @@ def run_shower_check(check, t):
         large = events.Impact(now, centre, SHOWER_CHECK_MASS, 0.6, 4_000.0, 60.0, 0.0,
                               events.crater_of(SHOWER_CHECK_MASS))
         small = events.Impact(now + 1.0, ahead, SHOWER_CHECK_ROCK, 0.6, 4_000.0, 60.0, 0.0)
-        state["shower_body"] = None
+        state.showers.body = None
         showers.set_shower(events.Shower(now, centre, [large, small]))
         s.update(step="fly", craters=list(world.craters), large=large, small=small, heads=0, flash=0.0,
                  shake=0.0, plumes=0, natural=None, t0=t)
         return False
     large, small = s["large"], s["small"]
     if step == "fly":
-        s["heads"] = max(s["heads"], state["heads_drawn"])
+        s["heads"] = max(s["heads"], state.showers.heads_drawn)
         tint = showers.flash_tint()
         s["flash"] = max(s["flash"], tint[1] if tint is not None else 0.0)
-        if state["shake"] is not None:
-            s["shake"] = max(s["shake"], state["shake"][1])
-        s["plumes"] = max(s["plumes"], len(state["plumes"]))
-        for toast in state["hud"].toasts:
+        if state.showers.shake is not None:
+            s["shake"] = max(s["shake"], state.showers.shake[1])
+        s["plumes"] = max(s["plumes"], len(state.showers.plumes))
+        for toast in state.ui.hud.toasts:
             for key, start in (("warned", "Meteor shower inbound"), ("down", "Meteorite down")):
                 if toast[0].startswith(start):
                     s[key] = True
-        if s["natural"] is None and 0 in state["impact_heights"]:
-            s["natural"] = state["impact_heights"][0]
+        if s["natural"] is None and 0 in state.showers.impact_heights:
+            s["natural"] = state.showers.impact_heights[0]
         up = player.up()
-        path, before = state["paths"].get(0), large.time - world.time
+        path, before = state.showers.paths.get(0), large.time - world.time
         aim = None
         if args.shot and path is not None and 2.0 < before <= min(5.0, path.duration):
             aim = add(planet.centre(), path.at(before))
@@ -1101,7 +1101,7 @@ def run_shower_check(check, t):
             to = sub(foot.bubble.to_bubble(aim), player.eye())
             player.heading = player.level(to, up)
             player.pitch = math.asin(max(-1.0, min(1.0, dot(normalize(to), up))))
-        if args.shot and before <= 3.0 and "meteor_shot" not in s and state["heads_drawn"] > 0:
+        if args.shot and before <= 3.0 and "meteor_shot" not in s and state.showers.heads_drawn > 0:
             s["meteor_shot"] = True
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_meteor" + ext)
@@ -1113,14 +1113,14 @@ def run_shower_check(check, t):
             s["plume_shot"] = True
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_plume" + ext)
-        if state["shower"] is None and world.time >= small.time + SHOWER_LAND_SECONDS:
+        if state.showers.shower is None and world.time >= small.time + SHOWER_LAND_SECONDS:
             s["step"], s["t0"] = "measure", t
         elif t - s["t0"] > SHOWER_CHECK_LEAD + 30.0:
             print("[walker] the shower did not strike in %.0f s: FAILED" % (t - s["t0"]), flush=True)
             os._exit(1)
         return False
     if step == "measure":
-        meteorite = state["meteorite"]
+        meteorite = state.showers.meteorite
         rock = next((p for p in foot.props.rocks if p.resource == resources.IRIDIUM and p is not meteorite), None)
         dug = [c for c in world.craters if c not in s["craters"]]
         crater_ok = (len(dug) == 1 and abs(dug[0].radius - large.crater[0]) < 1e-9
@@ -1132,8 +1132,8 @@ def run_shower_check(check, t):
         floor = (s["natural"] or 0.0) - large.crater[1]
         meteorite_ok = (meteorite is not None and meteorite.resource == resources.IRIDIUM
                         and abs(meteorite.mass - large.mass) < 1.0 and walking.settled(meteorite)
-                        and lies is not None and abs(lies - floor) < 1.0 and id(meteorite) in state["hot"])
-        rock_ok = rock is not None and abs(rock.mass - small.mass) < 0.5 and id(rock) in state["hot"]
+                        and lies is not None and abs(lies - floor) < 1.0 and id(meteorite) in state.showers.hot)
+        rock_ok = rock is not None and abs(rock.mass - small.mass) < 0.5 and id(rock) in state.showers.hot
         warned, down = s.get("warned", False), s.get("down", False)
         seen_ok = (s["heads"] > 0 and s["flash"] > 0.0 and s["shake"] > 0.0 and s["plumes"] >= PLUME_PUFFS
                    and warned and down)
@@ -1183,7 +1183,7 @@ def run_shower_check(check, t):
             ok = status == "too_hot" and held is None
             s["lines"].append("the gun refuses the hot rock (%s): %s" % (status, "ok" if ok else "FAILED"))
             s["ok"] = s["ok"] and ok
-            del state["hot"][id(rock)]
+            del state.showers.hot[id(rock)]
             s["step"], s["t0"] = "cooled", t
         return False
     if step == "cooled":
@@ -1228,19 +1228,19 @@ def run_storm_check(check, t):
             world.storm = wind_field.Storm(here, axis, 0.0, STORM_CHECK_RADIUS, world.time - wind_field.FADE,
                                            world.time + 3600.0, planet.radius)
             s["wind"] = (steady, length(world.wind_at(planet, planet.relative(feet), 10.0)))
-            home = state["home"]
+            home = state.site.home
             s["ore"] = walking.ore_rock(add(home.point(), scale(home.direction, 1.0)), CHECK_ORE_EXTENT, CHECK_ORE_GRADE)
             economy.fill_tank()
-            s["tank"] = state["car_note"]
+            s["tank"] = state.vehicle.note
             c = contracting.pinned_contract()
             s["contract"] = (c, c.paused if c is not None else 0.0, world.time)
             s["rain"] = 0
             s["step"], s["t0"] = "storm", t
         return False
     if step == "storm":
-        s["rain"] = max(s["rain"], state["rain_drawn"])
-        for toast in state["hud"].toasts:
-            if toast[0].startswith("Storm approaching " + state["home"].name):
+        s["rain"] = max(s["rain"], state.storms.rain_drawn)
+        for toast in state.ui.hud.toasts:
+            if toast[0].startswith("Storm approaching " + state.site.home.name):
                 s["warned"] = True
         if since < STORM_CHECK_SECONDS:
             return False
@@ -1278,8 +1278,8 @@ def run_storm_check(check, t):
         sold = not any(p is s["ore"] for p in foot.props.rocks)
         if not sold and since < SELL_SECONDS:
             return False
-        reopened = any(toast[0].startswith("The storm has passed " + state["home"].name)
-                       for toast in state["hud"].toasts)
+        reopened = any(toast[0].startswith("The storm has passed " + state.site.home.name)
+                       for toast in state.ui.hud.toasts)
         s["lines"].append("the storm gone: Base open again (%s), the ore sold after %.1f s: %s"
                           % (reopened, since, "ok" if sold and reopened else "FAILED"))
         s["ok"] = s["ok"] and sold and reopened
@@ -1296,7 +1296,7 @@ def run_storm_check(check, t):
 def run_space_check(check, t):
     """--check's space mode (see run_check); True once done."""
     s = check.setdefault("space", {"step": "climb", "t0": t, "lines": [], "ok": True})
-    car, step, since = state["car"], s["step"], t - s["t0"]
+    car, step, since = state.vehicle.car, s["step"], t - s["t0"]
 
     def done(ok, line, next_step):
         s["ok"] = s["ok"] and ok
@@ -1304,16 +1304,16 @@ def run_space_check(check, t):
         s["step"], s["t0"] = next_step, t
 
     if step == "climb":
-        state["car_controls"] = hovercar.CarControls(climb=1.0)
+        state.vehicle.controls = hovercar.CarControls(climb=1.0)
         if car.height is not None and car.height >= SPACE_HEIGHT + 5.0:
-            state["car_controls"] = hovercar.CarControls()
+            state.vehicle.controls = hovercar.CarControls()
             entered = spaceflight.enter_space()
             s["from"] = (car.height, car.fuel)
             done(entered, "into space mode %.0f m up" % car.height, "rise")
         elif since > SPACE_CHECK_SECONDS:
             done(False, "the car did not climb to %.0f m" % SPACE_HEIGHT, "done")
         return False
-    ship, controls = state["space"], state["space_controls"]
+    ship, controls = state.space.ship, state.space.controls
     if step == "rise":
         controls.vertical = 1.0
         if since >= SPACE_RISE_SECONDS:
@@ -1329,9 +1329,9 @@ def run_space_check(check, t):
                 walking.screenshot(base + "_space" + ext)
             saving.save_game(CHECK_SAVE_BASE, quiet=True)
             s["saved_at"] = ship.position
-            state["space"].position = add(ship.position, (100.0, 0.0, 0.0))
+            state.space.ship.position = add(ship.position, (100.0, 0.0, 0.0))
             loaded = saving.load_game(CHECK_SAVE_BASE)
-            moved = length(sub(state["space"].position, s["saved_at"])) if state["space"] is not None else math.inf
+            moved = length(sub(state.space.ship.position, s["saved_at"])) if state.space.ship is not None else math.inf
             done(loaded and moved < 0.01, "saved and loaded in space mode: %.3f m from where it was saved" % moved,
                  "down")
         return False
@@ -1343,22 +1343,22 @@ def run_space_check(check, t):
         if car.height is not None and car.height < HOVER_BACK - 20.0:
             controls.vertical = 0.0
             back = spaceflight.leave_space()
-            done(back and state["space"] is None and spaceflight.car_body() is planet,
+            done(back and state.space.ship is None and spaceflight.car_body() is planet,
                  "back to the hover car %.0f m up over the planet" % car.height, "to_moon")
         elif since > SPACE_CHECK_SECONDS:
             done(False, "it did not come down within %.0f m" % HOVER_BACK, "done")
         return False
     if step == "to_moon":
-        outpost = next(o for o in state["outposts"] if o.body is not planet)
+        outpost = next(o for o in state.site.outposts if o.body is not planet)
         moon = outpost.body
         up = outpost.direction
         east, north = local_frame(up)
         position = add(moon.centre(), scale(up, moon.radius + outpost.height + SPACE_CHECK_DROP))
-        state["space"] = flight.Ship(position, moon.velocity(), quat_from_basis(east, up, scale(north, -1.0)),
-                                     params=hovercar.space_params(state["params"]["car"], SHIP_HALF), fuel=car.fuel,
+        state.space.ship = flight.Ship(position, moon.velocity(), quat_from_basis(east, up, scale(north, -1.0)),
+                                     params=hovercar.space_params(state.economy.params["car"], SHIP_HALF), fuel=car.fuel,
                                      cargo=car.cargo)
-        state["space_controls"] = flight.Controls(vertical=-1.0, assist=True)
-        state["ship_time"], state["warp"] = world.time, 0
+        state.space.controls = flight.Controls(vertical=-1.0, assist=True)
+        state.space.time, state.space.warp = world.time, 0
         s["outpost"] = outpost
         s["step"], s["t0"] = "land", t
         return False
@@ -1369,13 +1369,13 @@ def run_space_check(check, t):
                 done(False, "the car did not land on the moon in %.0f s" % SPACE_LAND_SECONDS, "done")
             return False
         away = outposts.ground_distance(outpost.body.radius, outpost.direction, normalize(car.position))
-        hard = any(toast[0].startswith("Hard landing") for toast in state["hud"].toasts)
+        hard = any(toast[0].startswith("Hard landing") for toast in state.ui.hud.toasts)
         done(spaceflight.car_body() is outpost.body and not hard and away < 50.0,
              "came down %.0f m on the assist and landed on the moon %.0f m from %s's pad, the hover car again"
              % (SPACE_CHECK_DROP, away, outpost.name), "settle")
         return False
     if step == "settle":
-        state["car_controls"] = hovercar.CarControls()
+        state.vehicle.controls = hovercar.CarControls()
         if since >= 2.0:
             left = vehicle.leave_car()
             s["left"] = left
@@ -1393,7 +1393,7 @@ def run_space_check(check, t):
         moon_ok = (foot.bubble.body is s["outpost"].body and temperature is not None
                    and abs(temperature - suit.moon_temperature(dot(world.sun_direction(),
                                                                    normalize(foot.bubble.body.relative(
-                                                                       state["position"]))))) < 1e-6)
+                                                                       state.view.position))))) < 1e-6)
         if args.shot:
             base, ext = os.path.splitext(args.shot)
             walking.screenshot(base + "_moon" + ext)
@@ -1408,38 +1408,38 @@ def run_space_check(check, t):
         when = world.time + MOON_SHOWER_CHECK_LEAD
         large = events.Impact(when, centre, SHOWER_CHECK_MASS, 0.6, 3_000.0, 60.0, 0.0,
                               events.crater_of(SHOWER_CHECK_MASS))
-        state["shower_body"] = moon
+        state.showers.body = moon
         showers.set_shower(events.Shower(when, centre, [large]))
         s["impact"], s["craters"] = large, list(world.craters)
         s["step"], s["t0"] = "moon_strike", t
         return False
     if step == "moon_strike":
         large = s["impact"]
-        if "natural" not in s and 0 in state["impact_heights"]:
-            s["natural"] = state["impact_heights"][0]
-        if state["shower"] is not None or world.time < large.time + SHOWER_LAND_SECONDS:
+        if "natural" not in s and 0 in state.showers.impact_heights:
+            s["natural"] = state.showers.impact_heights[0]
+        if state.showers.shower is not None or world.time < large.time + SHOWER_LAND_SECONDS:
             if since > MOON_SHOWER_CHECK_LEAD + 30.0:
                 done(False, "the moon's shower did not strike", "home")
             return False
         moon = s["outpost"].body
         dug = [c for c in world.craters if c not in s["craters"]]
-        meteorite = state["meteorite"]
+        meteorite = state.showers.meteorite
         lies = None
         if meteorite is not None:
             body, position, _ = foot.prop_state(meteorite)
             lies = length(position) - moon.radius - meteorite.rest if body is moon else None
         floor = s.get("natural", 0.0) - large.crater[1]
         ok = (len(dug) == 1 and dug[0].body == moon.index and lies is not None and abs(lies - floor) < 1.0
-              and state["shower_body"] is moon)
+              and state.showers.body is moon)
         done(ok, "a meteorite struck the moon %.0f m away: its crater on the moon, the meteorite %s m from its floor"
              % (MOON_SHOWER_CHECK_AWAY, "%.2f" % (lies - floor) if lies is not None else "-"), "refine")
         return False
     if step == "refine":
-        refinery = next(o for o in state["outposts"] if o.refinery)
+        refinery = next(o for o in state.site.outposts if o.refinery)
         up = refinery.direction
         car.position = scale(up, refinery.body.radius + refinery.height + SHIP_CLEARANCE)
         car.velocity = (0.0, 0.0, 0.0)
-        state["car_body"] = refinery.body
+        state.vehicle.body = refinery.body
         car.cargo.append({"body": refinery.body.name, "direction": up, "mass": REFINE_CHECK_ICE, "grade": 0.5,
                           "resource": resources.ICE})
         car.fuel = car.params.fuel_capacity - REFINE_CHECK_ROOM
@@ -1456,7 +1456,7 @@ def run_space_check(check, t):
         position, _, _, north = site.ship_pose()
         vehicle.make_car(position, north)
         vehicle.update_ship()
-        state["chase"].reset()
+        state.view.chase.reset()
         print("[walker] space mode:\n" + "\n".join("[walker]   " + line for line in s["lines"])
               + "\n[walker]   %s" % ("passed" if s["ok"] else "FAILED"), flush=True)
         check["space_ok"] = s["ok"]
@@ -1468,6 +1468,6 @@ def run_space_check(check, t):
 
 def check_contract(kind, n, **fields):
     """--check: a contract of `kind` from Base to Base for 100 cr, due in contracts.DEADLINE_DAYS days."""
-    home = state["home"].name
+    home = state.site.home.name
     values = dict({"deadline": contracting.contract_day() + contracts.DEADLINE_DAYS}, **fields)
     return contracts.Contract("check/%d" % n, kind, home, values.pop("destination", home), 100.0, **values)

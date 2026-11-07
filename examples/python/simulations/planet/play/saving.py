@@ -15,7 +15,8 @@ import suit
 import upgrades
 from explored_map import Grid
 import hud as hud_module
-from play.core import (AUTOSAVE_SECONDS, GOOD_TOAST, SHIP_HALF, args, bodies, foot, planet, save_base, settings, state,
+from play.state import AUTOSAVE_SECONDS
+from play.core import (GOOD_TOAST, SHIP_HALF, args, bodies, foot, planet, save_base, settings, state,
                        world)
 from play import contracting, economy, exploring, menus, showers, site, spaceflight, survival, vehicle
 
@@ -31,13 +32,13 @@ def save_game(base=None, quiet=False):
     and the ledger (gamelog.py).
     Returns the data, or None without a player or the car driven."""
     player = foot.player
-    if player is None and not state["driving"]:
+    if player is None and not state.vehicle.driving:
         if not quiet:
-            state["hud"].toast("Nothing to save until you are on foot", hud_module.WARNING)
+            state.ui.hud.toast("Nothing to save until you are on foot", hud_module.WARNING)
         return None
     bubble = foot.bubble
-    waypoint = state["waypoint"]
-    car = state["car"]
+    waypoint = state.progress.waypoint
+    car = state.vehicle.car
     data = {
         "terrain": planet.terrain,
         "time": world.time,
@@ -45,44 +46,44 @@ def save_game(base=None, quiet=False):
             "on": bubble.body.name, "feet": list(bubble.body_relative(player.feet())),
             "heading": list(player.basis()[2]), "pitch": player.pitch},
         "car": {"position": list(car.position), "heading": list(car.heading), "target": car.target,
-                "driving": state["driving"], "fuel": car.fuel, "body": spaceflight.car_body().name,
+                "driving": state.vehicle.driving, "fuel": car.fuel, "body": spaceflight.car_body().name,
                 "space": space_record(),
                 "cargo": [dict(item, direction=list(item["direction"])) for item in car.cargo]},
         "taken": [list(key) for key in sorted(world.taken_rocks.keys)],
         "props": foot.props.records(bubble) if bubble is not None else [],
-        "seen": [state["seen"].get(id(p)) for p in foot.props.all],
-        "pods": [list(state["pods"][id(p)]) if id(p) in state["pods"] else None for p in foot.props.all],
-        "couriers": [state["couriers"].get(id(p)) for p in foot.props.all],
-        "contracts": {"active": [contracts.record(c) for c in state["contracts"]],
-                      "taken": sorted(i for i in state["offers_taken"]
+        "seen": [state.economy.seen.get(id(p)) for p in foot.props.all],
+        "pods": [list(state.exploring.pods[id(p)]) if id(p) in state.exploring.pods else None for p in foot.props.all],
+        "couriers": [state.contracts.couriers.get(id(p)) for p in foot.props.all],
+        "contracts": {"active": [contracts.record(c) for c in state.contracts.active],
+                      "taken": sorted(i for i in state.contracts.offers_taken
                                       if i.rsplit("/", 2)[1] == str(contracting.contract_day())),
-                      "pinned": state["pinned"], "reputation": dict(state["reputation"]),
-                      "done": state["contracts_done"], "failed": state["contracts_failed"]},
-        "market": state["market"].record(state["outposts"]),
-        "game": {"sold_kg": state["sold_kg"], "earned": state["earned"], "ore_chunks": state["ore_chunks"],
-                 "ore_seen": state["ore_seen"], "waypoints": state["waypoints"],
-                 "objective": state["objectives"].index},
+                      "pinned": state.contracts.pinned, "reputation": dict(state.contracts.reputation),
+                      "done": state.contracts.done, "failed": state.contracts.failed},
+        "market": state.economy.market.record(state.site.outposts),
+        "game": {"sold_kg": state.economy.sold_kg, "earned": state.economy.earned, "ore_chunks": state.progress.ore_chunks,
+                 "ore_seen": state.progress.ore_seen, "waypoints": state.progress.waypoints,
+                 "objective": state.progress.objectives.index},
         "waypoint": None if waypoint is None else [waypoint[0].name, list(waypoint[1])],
         "day_offset": survival.day_time() - world.time,
-        "upgrades": sorted(state["owned"]),
-        "suit": {"reserve": state["suit"].reserve, "health": state["suit"].health},
-        "pois": state["pois"].record(),
-        "parts": dict(state["parts"]),
-        "survey_data": state["survey_data"],
+        "upgrades": sorted(state.economy.owned),
+        "suit": {"reserve": state.suit.state.reserve, "health": state.suit.state.health},
+        "pois": state.exploring.pois.record(),
+        "parts": dict(state.economy.parts),
+        "survey_data": state.economy.survey_data,
         "modifiers": [events.crater_record(c, t, next(b.name for b in bodies if b.index == c.body))
-                      for c, t in state["craters"]],
-        "events": {"next_shower": state["shower"].start if state["shower"] is not None else state["next_shower"],
+                      for c, t in state.showers.craters],
+        "events": {"next_shower": state.showers.shower.start if state.showers.shower is not None else state.showers.next_start,
                    "storm": events.storm_record(world.storm) if world.storm is not None else None},
-        "hot": [list(state["hot"][id(p)]) if id(p) in state["hot"] else None for p in foot.props.all],
-        "meteorite": next((n for n, p in enumerate(foot.props.all) if p is state["meteorite"]), None),
-        "log": state["log"].record(),
-        "ledger": state["ledger"].record(),
+        "hot": [list(state.showers.hot[id(p)]) if id(p) in state.showers.hot else None for p in foot.props.all],
+        "meteorite": next((n for n, p in enumerate(foot.props.all) if p is state.showers.meteorite), None),
+        "log": state.progress.log.record(),
+        "ledger": state.economy.ledger.record(),
     }
-    data = save.write(base or save_base, data, state["map"].grids)
-    state["last_save"] = data
-    state["autosave_in"] = AUTOSAVE_SECONDS
+    data = save.write(base or save_base, data, state.ui.map.grids)
+    state.session.last_save = data
+    state.session.autosave_in = AUTOSAVE_SECONDS
     if not quiet:
-        state["hud"].toast("Game saved", GOOD_TOAST)
+        state.ui.hud.toast("Game saved", GOOD_TOAST)
     print("[walker] saved to %s" % (base or save_base), flush=True)
     return data
 
@@ -96,32 +97,32 @@ def load_game(base=None):
     try:
         data, arrays = save.read(base or save_base)
     except save.SaveError as error:
-        state["hud"].toast(str(error).capitalize(), hud_module.WARNING)
+        state.ui.hud.toast(str(error).capitalize(), hud_module.WARNING)
         print("[walker] %s" % error, flush=True)
         return False
     if data["terrain"] != planet.terrain:
-        state["hud"].toast("The save is of another planet", hud_module.WARNING)
+        state.ui.hud.toast("The save is of another planet", hud_module.WARNING)
         return False
     by_name = {body.name: body for body in bodies}
     menus.set_paused(False)
-    state["driving"] = False
+    state.vehicle.driving = False
     vehicle.set_fov(settings["fov"])
     foot.drop_bubble()
     foot.props.clear(None)
     world.extra_probes = []
     world.time = data["time"]
-    state["day_offset"] = data.get("day_offset")
-    state["fuel_call"] = None
+    state.session.day_offset = data.get("day_offset")
+    state.vehicle.fuel_call = None
     record = data.get("suit") or {}
-    state["suit"] = suit.SuitState(record.get("reserve", 1.0), record.get("health", 1.0))
+    state.suit.state = suit.SuitState(record.get("reserve", 1.0), record.get("health", 1.0))
     taken = world.taken_rocks
     taken.clear()
     for key in data["taken"]:
         taken.add(tuple(key))
-    state["seen"] = {}
-    state["pods"] = {}
-    state["couriers"], state["crate_velocity"] = {}, {}
-    state["hot"], restored = {}, []
+    state.economy.seen = {}
+    state.exploring.pods = {}
+    state.contracts.couriers, state.contracts.crate_velocity = {}, {}
+    state.showers.hot, restored = {}, []
     none = [None] * len(data["props"])
     for record, seen, pod, courier, hot in zip(data["props"], data["seen"], data.get("pods") or none,
                                                data.get("couriers") or none, data.get("hot") or none):
@@ -131,123 +132,124 @@ def load_game(base=None):
             prop = foot.rocks.restore(foot.physics, record, by_name)
         restored.append(prop)
         if hot is not None:
-            state["hot"][id(prop)] = tuple(hot)
+            state.showers.hot[id(prop)] = tuple(hot)
         if seen is not None:
-            state["seen"][id(prop)] = (seen[0], tuple(seen[1]))
+            state.economy.seen[id(prop)] = (seen[0], tuple(seen[1]))
         if pod is not None:
-            state["pods"][id(prop)] = tuple(pod)
+            state.exploring.pods[id(prop)] = tuple(pod)
         if courier is not None:
-            state["couriers"][id(prop)] = courier
+            state.contracts.couriers[id(prop)] = courier
     meteorite = data.get("meteorite")
-    state["meteorite"] = restored[meteorite] if meteorite is not None else None
-    state["craters"] = [events.crater_from_record(r, by_name[r["body"]].index, planet_world.Crater)
+    state.showers.meteorite = restored[meteorite] if meteorite is not None else None
+    state.showers.craters = [events.crater_from_record(r, by_name[r["body"]].index, planet_world.Crater)
                         for r in data.get("modifiers", []) if r.get("type") == "crater" and r.get("body") in by_name]
-    world.set_craters([c for c, _ in state["craters"]])
+    world.set_craters([c for c, _ in state.showers.craters])
     showers.set_shower(None)
-    state["shower_body"] = None
-    state["next_shower"] = (data.get("events") or {}).get("next_shower")
+    state.showers.body = None
+    state.showers.next_start = (data.get("events") or {}).get("next_shower")
     storm = (data.get("events") or {}).get("storm")
     world.storm = events.storm_from_record(storm) if storm is not None else None
-    state["storm_warned"], state["storm_closed"], state["in_storm"] = set(), set(), False
-    state["flash"], state["shake"], state["plumes"] = None, None, []
-    state["pois"].restore(data.get("pois", []), exploring.poi_seed())
-    state["poi_want_at"], state["poi_asked"], state["poi_asking"] = None, None, []
-    state["parts"] = dict(data.get("parts", {}))
-    state["survey_data"] = data.get("survey_data", 0.0)
-    state["log"].restore(data.get("log"))
-    state["ledger"].restore(data.get("ledger"), None)
-    save.restore_grids(state["map"], arrays, by_name, Grid)
-    state["walked_counted"] = None
+    state.storms.warned, state.storms.closed, state.storms.inside = set(), set(), False
+    state.showers.flash, state.showers.shake, state.showers.plumes = None, None, []
+    state.exploring.pois.restore(data.get("pois", []), exploring.poi_seed())
+    state.exploring.want_at, state.exploring.asked, state.exploring.asking = None, None, []
+    state.economy.parts = dict(data.get("parts", {}))
+    state.economy.survey_data = data.get("survey_data", 0.0)
+    state.progress.log.restore(data.get("log"))
+    state.economy.ledger.restore(data.get("ledger"), None)
+    save.restore_grids(state.ui.map, arrays, by_name, Grid)
+    state.exploring.walked_counted = None
     game = data["game"]
-    for name in ("sold_kg", "earned", "ore_chunks", "ore_seen", "waypoints"):
-        state[name] = game[name]
-    state["objectives"].index = game["objective"]
+    state.economy.sold_kg, state.economy.earned = game["sold_kg"], game["earned"]
+    state.progress.ore_chunks, state.progress.ore_seen = game["ore_chunks"], game["ore_seen"]
+    state.progress.waypoints = game["waypoints"]
+    state.progress.objectives.index = game["objective"]
     waypoint = data["waypoint"]
-    state["waypoint"] = None if waypoint is None else (by_name[waypoint[0]], tuple(waypoint[1]))
-    state["market_record"] = data["market"]
+    state.progress.waypoint = None if waypoint is None else (by_name[waypoint[0]], tuple(waypoint[1]))
+    state.session.market_record = data["market"]
     restore_market()
-    state["car"] = None
+    state.vehicle.car = None
     economy.apply_upgrades(k for k in data.get("upgrades", []) if k in upgrades.BY_KEY)
     record = data.get("car")
     if record is not None:
-        state["car"] = hovercar.Car(tuple(record["position"]), tuple(record["heading"]), record["target"],
-                                    params=state["params"]["car"], fuel=record.get("fuel"))
-        state["car"].cargo = [dict(item, direction=tuple(item["direction"])) for item in record.get("cargo", [])]
+        state.vehicle.car = hovercar.Car(tuple(record["position"]), tuple(record["heading"]), record["target"],
+                                    params=state.economy.params["car"], fuel=record.get("fuel"))
+        state.vehicle.car.cargo = [dict(item, direction=tuple(item["direction"])) for item in record.get("cargo", [])]
         body = by_name.get(record.get("body", planet.name), planet)
-        state["car_body"] = None if body is planet else body
+        state.vehicle.body = None if body is planet else body
         restore_space(record.get("space"))
         vehicle.update_ship()
     else:
         position, _, _, north = site.ship_pose()
         vehicle.make_car(position, north)
     kept = data.get("contracts") or {}
-    state["contracts"] = [contracts.restore(r) for r in kept.get("active", [])]
-    state["offers_taken"] = set(kept.get("taken", []))
-    state["pinned"] = kept.get("pinned")
-    state["reputation"] = dict(kept.get("reputation", {}))
-    state["contracts_done"], state["contracts_failed"] = kept.get("done", 0), kept.get("failed", 0)
-    held = {i.get("contract") for i in state["car"].cargo}
-    for c in state["contracts"]:
+    state.contracts.active = [contracts.restore(r) for r in kept.get("active", [])]
+    state.contracts.offers_taken = set(kept.get("taken", []))
+    state.contracts.pinned = kept.get("pinned")
+    state.contracts.reputation = dict(kept.get("reputation", {}))
+    state.contracts.done, state.contracts.failed = kept.get("done", 0), kept.get("failed", 0)
+    held = {i.get("contract") for i in state.vehicle.car.cargo}
+    for c in state.contracts.active:
         if c.kind == "recovery":
-            contracting.place_pod(c, done=contracting.pod_key(c) in state["pods"].values() or c.id in held)
-    state["car_poses"] = None
+            contracting.place_pod(c, done=contracting.pod_key(c) in state.exploring.pods.values() or c.id in held)
+    state.vehicle.poses = None
     p = data["player"]
     if p is None or (record is not None and record["driving"]):
-        state["loading"] = None
-        state["driving"] = True
-        state["chase"].reset()
+        state.session.loading = None
+        state.vehicle.driving = True
+        state.view.chase.reset()
         vehicle.place_chase(0.0)
     else:
         body = by_name[p["on"]]
         feet = add(body.centre(), tuple(p["feet"]))
-        state["loading"] = p
-        state["position"] = add(feet, scale(normalize(p["feet"]), 2.0))
-        state["forward"] = tuple(p["heading"])
+        state.session.loading = p
+        state.view.position = add(feet, scale(normalize(p["feet"]), 2.0))
+        state.view.forward = tuple(p["heading"])
     world.ground = None
-    state["last_save"] = data
-    state["autosave_in"] = AUTOSAVE_SECONDS
+    state.session.last_save = data
+    state.session.autosave_in = AUTOSAVE_SECONDS
     print("[walker] loaded %s" % (base or save_base), flush=True)
     return True
 
 
 def restore_market():
     """A loaded save's credits and supplies put back once the outposts' survey is done."""
-    record = state["market_record"]
-    if record is None or state["survey"] is not None:
+    record = state.session.market_record
+    if record is None or state.site.survey is not None:
         return
-    state["market"].restore(record, state["outposts"])
-    state["market_record"] = None
+    state.economy.market.restore(record, state.site.outposts)
+    state.session.market_record = None
 
 
 def space_record():
     """The car's space mode for the save: the ship's position and velocity
     (from the planet's centre), orientation and spin, and its controls; or None."""
-    ship = state["space"]
+    ship = state.space.ship
     if ship is None:
         return None
-    c = state["space_controls"]
+    c = state.space.controls
     return {"position": list(ship.position), "velocity": list(ship.velocity), "orientation": list(ship.orientation),
             "spin": list(ship.angular_velocity), "assist": c.assist, "throttle": c.throttle}
 
 
 def restore_space(record):
     """The car's space mode from a save's record (space_record), or none."""
-    state["space"], state["warp"] = None, 0
+    state.space.ship, state.space.warp = None, 0
     if record is None:
         return
-    car = state["car"]
-    state["space"] = flight.Ship(tuple(record["position"]), tuple(record["velocity"]), tuple(record["orientation"]),
-                                 tuple(record["spin"]), params=hovercar.space_params(state["params"]["car"], SHIP_HALF),
+    car = state.vehicle.car
+    state.space.ship = flight.Ship(tuple(record["position"]), tuple(record["velocity"]), tuple(record["orientation"]),
+                                 tuple(record["spin"]), params=hovercar.space_params(state.economy.params["car"], SHIP_HALF),
                                  fuel=car.fuel, cargo=car.cargo)
-    state["space_controls"] = flight.Controls(throttle=record["throttle"], assist=record["assist"])
-    state["ship_time"] = world.time
+    state.space.controls = flight.Controls(throttle=record["throttle"], assist=record["assist"])
+    state.space.time = world.time
 
 
 def autosave(dt):
     """With autosave on, the game saved after AUTOSAVE_SECONDS of play."""
-    if not settings["autosave"] or args.check or foot.player is None or state["system"].visible:
+    if not settings["autosave"] or args.check or foot.player is None or state.ui.system.visible:
         return
-    state["autosave_in"] -= dt
-    if state["autosave_in"] <= 0.0:
+    state.session.autosave_in -= dt
+    if state.session.autosave_in <= 0.0:
         save_game(quiet=True)
-        state["hud"].toast("Autosaved", hud_module.DIM)
+        state.ui.hud.toast("Autosaved", hud_module.DIM)
