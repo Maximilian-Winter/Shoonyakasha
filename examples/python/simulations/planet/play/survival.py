@@ -135,3 +135,18 @@ def update_lights(camera):
         if not state.vehicle.driving and foot.player is not None:
             lights.append(lamps.suit_lamp(camera, *walking.view_basis()))
     world.lights = lights
+
+
+# ── The save ───────────────────────────────────────────────────────────────
+
+def record():
+    """The save's section: the suit's reserve and the player's health, and
+    the day's offset (s added to the world's clock, clock.py)."""
+    return {"reserve": state.suit.state.reserve, "health": state.suit.state.health,
+            "day_offset": day_time() - world.time}
+
+
+def restore(section):
+    """The suit and the day as a save's section (`record`) has them."""
+    state.suit.state = suit.SuitState(section["reserve"], section["health"])
+    state.session.day_offset = section["day_offset"]

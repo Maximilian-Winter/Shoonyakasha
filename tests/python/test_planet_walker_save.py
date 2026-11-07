@@ -2,10 +2,9 @@
 (examples/python/simulations/planet/config.py and save.py): the settings'
 defaults, a file with missing, mistyped or out-of-range values, a file
 that cannot be parsed, writing only when changed; the save's round trip
-with the explored map's measured cells, a missing save, another version,
-a save of version 1 migrated (the car's fuel full and its hold empty,
-the props' resources, no upgrades, the new game's hour), grids of
-unknown bodies left out, and the line about a save. Plain
+with the explored map's measured cells, a missing save, another version
+(an older one too), grids of unknown bodies left out, and the line about
+a save. Plain
 Python: no engine needed.
 
     python -m unittest discover -s tests/python
@@ -102,12 +101,12 @@ class SaveTest(unittest.TestCase):
         self.dir.cleanup()
 
     def test_round_trip(self):
-        data = {"time": 12.5, "market": {"credits": 1240.0}, "game": {"objective": 2}}
+        data = {"world": {"time": 12.5}, "economy": {"market": {"credits": 1240.0}}, "progress": {"objective": 2}}
         written = save.write(self.base, data, {"planet": self.grid})
         self.assertEqual(written["version"], save.VERSION)
         self.assertTrue(save.exists(self.base))
         read, arrays = save.read(self.base)
-        self.assertEqual(read["time"], 12.5)
+        self.assertEqual(read["world"]["time"], 12.5)
         self.assertEqual(len(arrays["planet/index"]), 2)
         explored = Explored()
         save.restore_grids(explored, arrays, {"planet": self.planet}, Grid)
@@ -127,24 +126,11 @@ class SaveTest(unittest.TestCase):
         with self.assertRaises(save.SaveError):
             save.read(self.base)
         save.write(self.base, {}, {})
-        with open(self.base + ".json", "w", encoding="utf-8") as f:
-            json.dump({"version": save.VERSION + 1}, f)
-        with self.assertRaises(save.SaveError):
-            save.read(self.base)
-
-    def test_version_1_is_migrated(self):
-        save.write(self.base, {}, {})
-        old = {"version": 1, "car": {"position": [0.0, 0.0, 1.0], "heading": [1.0, 0.0, 0.0], "target": 0.45,
-                                     "driving": False},
-               "props": [{"kind": "rock", "grade": 0.6}, {"kind": "rock", "grade": 0.0},
-                         {"kind": "crate", "grade": 0.0}, {"kind": "rock", "grade": 0.7, "resource": 4}]}
-        with open(self.base + ".json", "w", encoding="utf-8") as f:
-            json.dump(old, f)
-        data, _ = save.read(self.base)
-        self.assertEqual(data["version"], save.VERSION)
-        self.assertEqual((data["car"]["fuel"], data["car"]["cargo"]), (None, []))
-        self.assertEqual([r["resource"] for r in data["props"]], [1, 0, 0, 4])
-        self.assertEqual((data["upgrades"], data["day_offset"]), ([], None))
+        for version in (save.VERSION + 1, save.VERSION - 1):
+            with open(self.base + ".json", "w", encoding="utf-8") as f:
+                json.dump({"version": version}, f)
+            with self.assertRaises(save.SaveError):
+                save.read(self.base)
 
     def test_grids_of_unknown_bodies_left_out(self):
         moon = Grid(Body("moon"), (1.0, 0.0, 0.0), size=17)

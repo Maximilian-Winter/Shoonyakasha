@@ -363,3 +363,30 @@ def set_fov(value):
         world.fov = value
         if world.camera is not None:
             engine.scene.set_camera_fov(world.camera, value)
+
+
+# ── The save ───────────────────────────────────────────────────────────────
+
+def record():
+    """The save's section: the car's position (from its body's centre),
+    heading, the height it keeps, whether it is driven, its fuel, its body,
+    its space mode (spaceflight.record) and its cargo."""
+    car = state.vehicle.car
+    return {"position": list(car.position), "heading": list(car.heading), "target": car.target,
+            "driving": state.vehicle.driving, "fuel": car.fuel, "body": spaceflight.car_body().name,
+            "space": spaceflight.record(),
+            "cargo": [dict(item, direction=list(item["direction"])) for item in car.cargo]}
+
+
+def restore(section, by_name):
+    """The car as a save's section (`record`) has it, of the upgrades'
+    parameters (the economy restored first); `by_name` the world bodies by
+    name. Not driven: the save's player says whether it is."""
+    state.vehicle.car = car = hovercar.Car(tuple(section["position"]), tuple(section["heading"]), section["target"],
+                                           params=state.economy.params["car"], fuel=section["fuel"])
+    car.cargo = [dict(item, direction=tuple(item["direction"])) for item in section["cargo"]]
+    body = by_name.get(section["body"], planet)
+    state.vehicle.body = None if body is planet else body
+    state.vehicle.driving, state.vehicle.poses, state.vehicle.fuel_call = False, None, None
+    spaceflight.restore(section["space"])
+    update_ship()

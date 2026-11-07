@@ -239,3 +239,30 @@ def space_lines():
         lines += ["MOON LEAD %3.0f  NOW %3.0f" % (math.degrees(t["lead"]), math.degrees(t["now"])),
                   "BURN IN %s  DV %.0f / %.0f" % (hud_module.wait_text(t["wait"]), t["burn"], r["dv"])]
     return lines
+
+
+# ── The save ───────────────────────────────────────────────────────────────
+
+def record():
+    """The car's space mode for the save: the ship's position and velocity
+    (from the planet's centre), orientation and spin, and its controls; or None."""
+    ship = state.space.ship
+    if ship is None:
+        return None
+    c = state.space.controls
+    return {"position": list(ship.position), "velocity": list(ship.velocity), "orientation": list(ship.orientation),
+            "spin": list(ship.angular_velocity), "assist": c.assist, "throttle": c.throttle}
+
+
+def restore(record):
+    """The car's space mode from a save's record (`record`), or none; the car restored first."""
+    state.space.ship, state.space.warp, state.space.hold = None, 0, None
+    if record is None:
+        return
+    car = state.vehicle.car
+    state.space.ship = flight.Ship(tuple(record["position"]), tuple(record["velocity"]), tuple(record["orientation"]),
+                                   tuple(record["spin"]),
+                                   params=hovercar.space_params(state.economy.params["car"], SHIP_HALF),
+                                   fuel=car.fuel, cargo=car.cargo)
+    state.space.controls = flight.Controls(throttle=record["throttle"], assist=record["assist"])
+    state.space.time = world.time

@@ -16,7 +16,8 @@ from shoonyakasha.planet.rocks import density as rock_density, rock_colour
 
 import events
 from hud import bearing, distance_text
-from play.core import METEOR_MARKER, PLUME_PUFFS, SMALL_PUFFS, args, engine, foot, planet, settings, state, world
+from play.core import (METEOR_MARKER, PLUME_PUFFS, SMALL_PUFFS, args, bodies, engine, foot, planet, settings,
+                       state, world)
 
 SHOWER_TRIES = 4                # times a shower whose large impact falls in water is planned again
 FALL_SPEED = 5.0                # m/s down a meteorite or rock flies from its impact until its ground is measured
@@ -388,3 +389,27 @@ def draw_showers(camera, basis):
             glows.disc(sub(add(body.centre(), position), camera), HOT_SIZE * prop.radius, scale(HOT_GLOW, heat))
     glows.end()
     state.showers.heads_drawn = heads
+
+
+# ── The save ───────────────────────────────────────────────────────────────
+
+def record():
+    """The save's section: the meteorites' craters (events.crater_record)
+    and the next shower's start (a shower under way, its start)."""
+    s = state.showers
+    return {"craters": [events.crater_record(c, t, next(b.name for b in bodies if b.index == c.body))
+                        for c, t in s.craters],
+            "next_start": s.shower.start if s.shower is not None else s.next_start}
+
+
+def restore(section, by_name):
+    """The craters as a save's section (`record`) has them, made in the
+    world; no shower planned until `update_showers` plans it from the next
+    start; no flash, shake or plume."""
+    s = state.showers
+    s.craters = [events.crater_from_record(r, by_name[r["body"]].index, planet_world.Crater)
+                 for r in section["craters"] if r.get("type") == "crater" and r.get("body") in by_name]
+    world.set_craters([c for c, _ in s.craters])
+    set_shower(None)
+    s.body, s.next_start = None, section["next_start"]
+    s.flash, s.shake, s.plumes = None, None, []

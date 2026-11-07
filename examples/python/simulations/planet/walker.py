@@ -81,8 +81,8 @@ or Load puts it back; the player comes back LOAD_LIFT above
 the ground where it stood once that ground is measured. With autosave on,
 the game is saved every AUTOSAVE_SECONDS of play, on getting out of the
 car parked on an outpost's pad, on Quit and as the window closes. The
-save is of save.VERSION; one of version 1 is migrated as it is read. When
-a save exists, the walker starts on the start's screen: a card of the
+save has a section for each system (play/saving.py) and is of
+save.VERSION; one of another version is refused. When a save exists, the walker starts on the start's screen: a card of the
 save, Continue (the save loaded), New game, Settings and Quit.
 
 The wind (PlanetWorld.wind_at): the car flies in it at its height above

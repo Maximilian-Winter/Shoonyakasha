@@ -537,3 +537,26 @@ def capture_toast():
 
 def screenshot(path):
     print("[walker] screenshot: %s" % (path if engine.capture_screenshot(path) else "failed"), flush=True)
+
+
+# ── The save ───────────────────────────────────────────────────────────────
+
+def record():
+    """The save's section of the game's progress: the objective reached, the
+    waypoints reached, the ore found, the waypoint (its body's name and
+    direction) and the log."""
+    p = state.progress
+    waypoint = p.waypoint
+    return {"objective": p.objectives.index, "waypoints": p.waypoints, "ore_chunks": p.ore_chunks,
+            "ore_seen": p.ore_seen, "waypoint": None if waypoint is None else [waypoint[0].name, list(waypoint[1])],
+            "log": p.log.record()}
+
+
+def restore(section, by_name):
+    """The progress as a save's section (`record`) has it; `by_name` the world bodies by name."""
+    p = state.progress
+    p.objectives.index = section["objective"]
+    p.waypoints, p.ore_chunks, p.ore_seen = section["waypoints"], section["ore_chunks"], section["ore_seen"]
+    waypoint = section["waypoint"]
+    p.waypoint = None if waypoint is None else (by_name[waypoint[0]], tuple(waypoint[1]))
+    p.log.restore(section["log"])

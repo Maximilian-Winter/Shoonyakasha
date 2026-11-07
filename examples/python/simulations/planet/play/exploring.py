@@ -328,3 +328,18 @@ def poi_markers(body):
         elif poi_distance(poi, here) <= POI_REACH:
             found.append(("Signal", poi_point(poi), SIGNAL_MARKER))
     return found
+
+
+# ── The save ───────────────────────────────────────────────────────────────
+
+def record():
+    """The save's section: the points of interest's states (pois.Pois.record)."""
+    return {"pois": state.exploring.pois.record()}
+
+
+def restore(section):
+    """The points of interest as a save's section (`record`) has them, to be looked for and measured again."""
+    x = state.exploring
+    x.pois.restore(section["pois"], poi_seed())
+    x.want_at, x.asked, x.asking = None, None, []
+    x.walked_counted = None

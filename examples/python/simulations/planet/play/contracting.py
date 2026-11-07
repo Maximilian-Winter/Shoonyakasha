@@ -343,3 +343,26 @@ def update_contracts(dt):
                 complete_contract(c)
 
 
+# ── The save ───────────────────────────────────────────────────────────────
+
+def record():
+    """The save's section: the active contracts, today's offers accepted,
+    the pin, the reputations and the counts done and failed."""
+    c = state.contracts
+    return {"active": [contracts.record(a) for a in c.active],
+            "taken": sorted(i for i in c.offers_taken if i.rsplit("/", 2)[1] == str(contract_day())),
+            "pinned": c.pinned, "reputation": dict(c.reputation), "done": c.done, "failed": c.failed}
+
+
+def restore(section):
+    """The contracts as a save's section (`record`) has them, each
+    recovery's pod placed (done when its crate is a prop or in the car's
+    hold); the props and the car restored first."""
+    c = state.contracts
+    c.active = [contracts.restore(r) for r in section["active"]]
+    c.offers_taken, c.pinned = set(section["taken"]), section["pinned"]
+    c.reputation, c.done, c.failed = dict(section["reputation"]), section["done"], section["failed"]
+    held = {i.get("contract") for i in state.vehicle.car.cargo}
+    for a in c.active:
+        if a.kind == "recovery":
+            place_pod(a, done=pod_key(a) in state.exploring.pods.values() or a.id in held)

@@ -25,7 +25,7 @@ import trade
 from explored_map import CELL
 from fieldslate import AMBER, CORAL, HOLO, ICE, MINT, MIST
 from objectives import progress_text
-from play.core import foot, planet, state, world
+from play.core import foot, state, world
 from play import contracting, economy, exploring, spaceflight, survival, vehicle, walking
 
 GAP = 17.0                       # canvas units between the panes
@@ -398,19 +398,18 @@ def log_toast(text, colour, detail, kind):
 
 def save_line(data):
     """"day 3 09:56 · 2,000 cr · goals 2/6 · saved 21:41" of a save's data."""
-    t = data.get("time", 0.0) + (data.get("day_offset") or 0.0)
+    t = data["world"]["time"] + data["survival"]["day_offset"]
     hour = clock.hour(t)
-    game = data.get("game", {})
-    credits = data.get("market", {}).get("credits", 0.0)
+    credits = data["economy"]["market"]["credits"]
     saved = time.strftime("%d %b %H:%M", time.localtime(data.get("saved_at", 0.0)))
     return "day %d %02d:%02d · %s · goals %d/%d · saved %s" % (
-        clock.day(t) + 1, int(hour) % 24, int(hour * 60.0) % 60, fs.credits(credits), game.get("objective", 0),
+        clock.day(t) + 1, int(hour) % 24, int(hour * 60.0) % 60, fs.credits(credits), data["progress"]["objective"],
         len(state.progress.objectives.goals), saved)
 
 
 def save_where(data):
-    player = data.get("player") or {}
-    return "On the %s" % (player.get("on") or planet.name)
+    player = data["player"]
+    return "On the %s" % (player["on"] if player is not None else data["vehicle"]["body"])
 
 
 def save_card(surface, left, top, width, data, button=None):

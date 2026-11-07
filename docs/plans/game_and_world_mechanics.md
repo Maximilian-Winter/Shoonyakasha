@@ -350,7 +350,7 @@ Both programs already save:
   - the scanner's contacts
   - the market (credits and the outposts' supplies)
   - the upgrades owned
-- **`walker.py`** (`save.py`, `VERSION` 2, `walker_save.json` and `walker_save.npz`, each written through a temporary file, the grids first) stores:
+- **`walker.py`** (`save.py`, `VERSION` 3, `walker_save.json` and `walker_save.npz`, each written through a temporary file, the grids first; a section for each system, `play/saving.py`) stores:
   - the clock, the player, the crates and loose rocks, the taken rocks
   - the credits and supplies, the objectives and the game's numbers
   - the waypoint and the car (its fuel and cargo)
@@ -361,8 +361,6 @@ Both programs already save:
   - the meteorites' craters, the next shower's start, which props are hot and since when, and which is the last meteorite (§11)
   - the storm under way or to come, and each contract's held-back time (§12.2)
   - the body the car is reckoned around (`"body"`) and its space mode (`"space"`: the ship's position and velocity from the planet's centre, orientation, spin, assist and throttle; none when hovering) (§13.2)
-
-  Those of §8–§11 are keys a version-2 save may lack; loading one without them starts them as a new game has them.
 
   It autosaves every `AUTOSAVE_SECONDS` (120 s), on getting out of the car parked on an outpost's pad, on Quit and as the window closes. `--check` saves and loads, on foot and driving.
 
@@ -393,10 +391,8 @@ Any other version is refused. The supply stays keyed by body name. Keying it by 
 
 With `--play`, `autosave_on_landing` saves to `planet_save.json` each time the ship lands on an outpost's pad after flying. It doesn't save in the sandbox, where the places and checks put the ship on pads. `--save-check` ends by loading its save as one of version 1.
 
-`walker.py`'s save (`save.py`) is of version 2 too. `save.read` migrates a version-1 save (`save.migrate`):
-- the car gets a full tank (`fuel` None) and an empty hold;
-- prop records without a resource become ferrite for ore, else 0;
-- `"upgrades"` starts empty, and the day starts at the new game's hour (`day_offset` None).
+`walker.py`'s save (`save.py`) is of version 3: a section for each system, each recorded and restored by its
+module (`play/saving.py`). A save of any other version is refused.
 
 ---
 

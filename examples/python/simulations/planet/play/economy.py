@@ -260,3 +260,35 @@ def buy_upgrade(upgrade):
     state.ui.hud.toast(state.economy.upgrade_note[0].upper() + state.economy.upgrade_note[1:], GOOD_TOAST, kind="money")
 
 
+# ── The save ───────────────────────────────────────────────────────────────
+
+def record():
+    """The save's section: the credits and the outposts' supplies, the ore
+    sold and the credits earned, the ledger, the upgrades owned, the parts
+    and the survey data."""
+    e = state.economy
+    return {"market": e.market.record(state.site.outposts), "sold_kg": e.sold_kg, "earned": e.earned,
+            "ledger": e.ledger.record(), "upgrades": sorted(e.owned), "parts": dict(e.parts),
+            "survey_data": e.survey_data}
+
+
+def restore(section):
+    """The economy as a save's section (`record`) has it: the upgrades
+    applied (apply_upgrades), and the credits and supplies once the
+    outposts' survey is done (`restore_market`)."""
+    e = state.economy
+    e.sold_kg, e.earned = section["sold_kg"], section["earned"]
+    e.ledger.restore(section["ledger"], None)
+    e.parts, e.survey_data = dict(section["parts"]), section["survey_data"]
+    apply_upgrades(k for k in section["upgrades"] if k in upgrades.BY_KEY)
+    state.session.market_record = section["market"]
+    restore_market()
+
+
+def restore_market():
+    """A loaded save's credits and supplies put back once the outposts' survey is done."""
+    record = state.session.market_record
+    if record is None or state.site.survey is not None:
+        return
+    state.economy.market.restore(record, state.site.outposts)
+    state.session.market_record = None

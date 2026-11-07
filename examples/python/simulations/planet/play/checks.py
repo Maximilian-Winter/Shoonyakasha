@@ -562,7 +562,7 @@ def run_check(dt):
             saved = saving.save_game(CHECK_SAVE_BASE)
             check["saved"] = {"credits": state.economy.market.credits, "cells": walking.game_numbers()["cells"],
                               "props": len(foot.props.all), "sold_kg": state.economy.sold_kg,
-                              "feet": foot.bubble.to_world(player.feet()), "time": saved["time"],
+                              "feet": foot.bubble.to_world(player.feet()), "time": saved["world"]["time"],
                               "contracts": [(c.id, c.kind, c.state) for c in state.contracts.active],
                               "pinned": state.contracts.pinned, "reputation": dict(state.contracts.reputation),
                               "craters": list(world.craters), "hot": sorted(state.showers.hot.values())}

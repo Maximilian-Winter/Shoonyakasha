@@ -129,3 +129,17 @@ def draw_rain(camera, basis):
             glows.streak(at, add(at, scale(fall, -RAIN_STREAK)), RAIN_WIDTH, scale(RAIN_COLOUR, s))
     glows.end()
     state.storms.rain_drawn = count
+
+
+# ── The save ───────────────────────────────────────────────────────────────
+
+def record():
+    """The save's section: the storm (events.storm_record), or None."""
+    return {"storm": events.storm_record(world.storm) if world.storm is not None else None}
+
+
+def restore(section):
+    """The storm as a save's section (`record`) has it, nothing announced or closed yet."""
+    storm = section["storm"]
+    world.storm = events.storm_from_record(storm) if storm is not None else None
+    state.storms.warned, state.storms.closed, state.storms.inside = set(), set(), False

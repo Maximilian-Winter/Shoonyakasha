@@ -14,7 +14,7 @@ from shoonyakasha.planet.world import SITE_BLEND_RADIUS
 
 from outposts import Survey
 from play.core import HERE, RIVER_CHECK_WIDTH, SHIP_CLEARANCE, blocks, bodies, box, engine, pads, planet, state, world
-from play import saving, spaceflight, vehicle, walking
+from play import economy, spaceflight, vehicle, walking
 
 EAST_OF_SHIP = 4.5               # m east of the ship's centre the player starts
 SHIP_SOUTH = 16.0                # m south of the blocks the ship stands
@@ -105,7 +105,7 @@ def update_rivers():
           % (len(found), sum(len(r.points) - 1 for r in found), river_length(found) / 1000.0), flush=True)
     world.end_survey()
     state.site.survey = None
-    saving.restore_market()
+    economy.restore_market()
 
 
 def river_spot():
