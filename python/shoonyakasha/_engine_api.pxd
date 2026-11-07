@@ -678,6 +678,74 @@ cdef extern from "Compute/ImageFiles.h" namespace "Shoonyakasha::Compute":
     void saveImage(const string& path, const CppComputeImage& image, uint32_t mip, uint32_t layer,
                    ExrPixelType type) except + nogil
 
+# ═══════════════════════════════════════════════════════════════
+# Audio (include/Audio/AudioEngine.h)
+# ═══════════════════════════════════════════════════════════════
+
+cdef extern from "Audio/AudioEngine.h" namespace "Shoonyakasha::Audio":
+    cdef cppclass AudioVec3 "std::array<float, 3>":
+        float& operator[](size_t)
+
+    cdef enum class AudioBus "Shoonyakasha::Audio::Bus":
+        Master "Shoonyakasha::Audio::Bus::Master"
+        World "Shoonyakasha::Audio::Bus::World"
+        Suit "Shoonyakasha::Audio::Bus::Suit"
+        UI "Shoonyakasha::Audio::Bus::UI"
+        Music "Shoonyakasha::Audio::Bus::Music"
+
+    cdef cppclass AudioConfig "Shoonyakasha::Audio::AudioConfig":
+        AudioConfig()
+        uint32_t sampleRate
+        uint32_t channels
+        uint32_t voices
+        cbool device
+
+    cdef cppclass AudioPlayParams "Shoonyakasha::Audio::PlayParams":
+        AudioPlayParams()
+        AudioBus bus
+        float volume
+        float pitch
+        cbool loop
+        cbool spatial
+        AudioVec3 position
+        AudioVec3 velocity
+        float minDistance
+        float maxDistance
+        float rolloff
+        float doppler
+        float delay
+        float fadeIn
+
+    cdef cppclass CppAudioEngine "Shoonyakasha::Audio::AudioEngine":
+        CppAudioEngine(const AudioConfig& config) except +
+        cbool hasDevice()
+        uint32_t sampleRate()
+        uint32_t channels()
+        uint64_t timeFrames()
+        uint32_t load(const string& path, cbool stream) except +
+        uint32_t loadSamples(const float* samples, uint64_t frames, uint32_t channels, uint32_t sampleRate) except +
+        void unload(uint32_t clip)
+        double clipLength(uint32_t clip)
+        uint64_t play(uint32_t clip, const AudioPlayParams& params)
+        void stop(uint64_t voice, float fade)
+        cbool active(uint64_t voice)
+        void setVoicePosition(uint64_t voice, const AudioVec3& position, const AudioVec3& velocity)
+        void setVoiceVolume(uint64_t voice, float volume)
+        void setVoicePitch(uint64_t voice, float pitch)
+        int activeVoices()
+        void setBusVolume(AudioBus bus, float volume, float fade)
+        float busVolume(AudioBus bus)
+        void pauseBus(AudioBus bus)
+        void resumeBus(AudioBus bus)
+        cbool busPaused(AudioBus bus)
+        void setWorldLowpass(float cutoffHz, float fade)
+        float worldLowpass()
+        void setListener(const AudioVec3& forward, const AudioVec3& up, const AudioVec3& velocity)
+        uint64_t read(float* out, uint64_t frames) nogil
+
+    AudioBus busFromName(const string& name) except +
+
+
 cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
     cdef cppclass CppBufferStream "Shoonyakasha::Facade::BufferStream":
         const string& name()
@@ -723,6 +791,7 @@ cdef extern from "Facade/EngineAPI.h" namespace "Shoonyakasha::Facade":
         CppAnimationAPI& getAnimation()
         CppEcsAPI& getEcs()
         CppUIAPI& getUI() except +
+        CppAudioEngine& getAudio() except +
 
         # Convenience helpers
         EntityHandle createCamera(const vec3& pos, float fov, float speed,

@@ -44,6 +44,9 @@ find_package(SheenBidi CONFIG REQUIRED)
 find_package(libunibreak CONFIG REQUIRED)
 find_package(draco CONFIG REQUIRED)
 find_package(Ktx CONFIG REQUIRED)
+# miniaudio is a single header with no CMake package; Audio/AudioEngine.cpp
+# includes it and ThirdParty/miniaudio_impl.cpp compiles it.
+find_path(MINIAUDIO_INCLUDE_DIR miniaudio.h REQUIRED)
 
 # CONFIGURE_DEPENDS makes the build system re-glob when files appear or vanish.
 # A glob without it goes stale the moment you add a source file.
@@ -86,6 +89,7 @@ target_include_directories(Shoonyakasha SYSTEM
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/cgltf
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/mikktspace
         ${CMAKE_CURRENT_SOURCE_DIR}/third_party/meshoptimizer
+        ${MINIAUDIO_INCLUDE_DIR}
 )
 
 # MikkTSpace tangent generation (Resources/MeshTangents.cpp). Its own object

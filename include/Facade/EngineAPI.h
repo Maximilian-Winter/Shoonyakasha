@@ -18,6 +18,7 @@
 
 namespace Shoonyakasha {
 namespace Compute { class Context; }
+namespace Audio { class AudioEngine; }
 namespace Facade {
 
 // Forward declare sub-APIs
@@ -231,6 +232,11 @@ public:
     /// @return Borrowed facade owned by this engine.
     /// @throws std::logic_error Before scene initialization; call from setOnInit().
     UIAPI&      getUI();
+    /// Access sound, made on the first call with the default device and
+    /// Audio::AudioConfig; usable before run().
+    /// @return Borrowed engine owned by this engine.
+    /// @throws std::runtime_error When miniaudio cannot start.
+    Audio::AudioEngine& getAudio();
 
     // ═══════════════════════════════════════════════════════════
     // Convenience Helpers

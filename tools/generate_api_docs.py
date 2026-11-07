@@ -64,7 +64,7 @@ def python_inventory(source, name, native_source=None):
             result_type = name if method_name == "__init__" else "None"
         if name == "Engine":
             result_type = {"scene": "Scene", "input": "Input", "physics": "Physics", "animation": "Animation",
-                           "ecs": "Ecs", "ui": "UI", "load_gltf_scene": "GltfResult",
+                           "ecs": "Ecs", "ui": "UI", "audio": "Audio", "load_gltf_scene": "GltfResult",
                            "render_stats": "dict or None"}.get(method_name, result_type)
         if name == "Ecs" and method_name == "get_component":
             result_type = "object or None"

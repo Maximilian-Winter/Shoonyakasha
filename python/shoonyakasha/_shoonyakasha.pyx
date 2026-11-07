@@ -57,6 +57,7 @@ from ._engine_api cimport (
     videoRecordingAvailable, findFfmpeg, checkPipelineJson, loadPipelineDocumentText, Readback,
     CppPlanetLod, LodBody, LodView, LodScatter, LodNodeInfo, LodJob, LodFaceColours,
     CppPlanetPhysics, PhysicsMotion, PhysicsRayHit, CharacterGround, LodVec3, LodVec4,
+    CppAudioEngine, AudioConfig, AudioPlayParams, AudioVec3, AudioBus, busFromName,
     CppComputeContext, CppComputeBuffer, CppComputeKernel, ComputeKernelInfo, ComputeKernelBinding,
     ComputeBindingType, ComputeUint3, CppComputeImage, CppComputeBinding, ComputeBindingDim,
     ExrPixelType, saveHdr, saveExr, saveImage, CppBufferStream,
@@ -2853,6 +2854,209 @@ cdef class BufferStream:
         return "BufferStream(%r, applied=%d, pending_bytes=%d)" % (self.name, self.applied, self.pending_bytes)
 
 
+import array as _array
+import os as _os
+
+
+cdef AudioVec3 _audio_vec3(value) except *:
+    cdef AudioVec3 out
+    for k in range(3):
+        out[k] = value[k]
+    return out
+
+
+cdef AudioBus _audio_bus(str name) except *:
+    try:
+        return busFromName(name.encode("utf-8"))
+    except Exception:
+        raise ValueError("no audio bus named %r: master, world, suit, ui or music" % name) from None
+
+
+cdef class Audio:
+    """Sound on miniaudio (include/Audio/AudioEngine.h): clips, a pool of
+    voices, the buses and one listener. engine.audio is the engine's;
+    Audio(device=False) makes one with no device, whose mix read() pulls.
+
+    Every voice plays into a bus, "world", "suit", "ui" or "music", and
+    those into "master"; "world" goes through a low-pass filter
+    (set_world_lowpass). Clips are files (WAV, FLAC or MP3), decoded at load
+    and shared between their voices or, with stream=True, streamed by each
+    voice; load_samples makes one from samples in memory. Clips and voices
+    are ints, 0 for none; a voice's int names nothing once it has ended.
+
+    Positions are in the caller's frame, in double precision: set_listener
+    gives the listener's position there, and play and set_voice subtract it
+    from a voice's position before miniaudio sees it. A voice keeps the
+    position it was last given relative to the listener, so a moving
+    listener calls set_voice for its spatial voices each frame."""
+    cdef CppAudioEngine* _ptr
+    cdef cbool _owned
+    cdef object _owner
+    cdef double _listener[3]
+
+    def __cinit__(self, *args, **kwargs):
+        self._ptr = NULL
+        self._owned = False
+        self._listener[0] = self._listener[1] = self._listener[2] = 0.0
+
+    def __init__(self, bint device=True, uint32_t sample_rate=48000, uint32_t channels=2, uint32_t voices=64):
+        cdef AudioConfig config
+        config.device = device
+        config.sampleRate = sample_rate
+        config.channels = channels
+        config.voices = voices
+        self._ptr = new CppAudioEngine(config)
+        self._owned = True
+
+    def __dealloc__(self):
+        if self._owned and self._ptr != NULL:
+            del self._ptr
+        self._ptr = NULL
+
+    cdef AudioVec3 _relative(self, position) except *:
+        cdef AudioVec3 out
+        for k in range(3):
+            out[k] = <float>(<double>position[k] - self._listener[k])
+        return out
+
+    @property
+    def has_device(self):
+        """Whether the mix plays on a device; without one, read() pulls it."""
+        return self._ptr.hasDevice()
+
+    @property
+    def sample_rate(self):
+        return self._ptr.sampleRate()
+
+    @property
+    def channels(self):
+        return self._ptr.channels()
+
+    @property
+    def time(self):
+        """Seconds of mix produced since the engine started."""
+        return self._ptr.timeFrames() / <double>self._ptr.sampleRate()
+
+    def load(self, path, bint stream=False):
+        """A file's clip. Raises RuntimeError when it cannot be read."""
+        return self._ptr.load(_os.fspath(path).encode("utf-8"), stream)
+
+    def load_samples(self, samples, uint32_t channels=1, uint32_t sample_rate=48000):
+        """A clip of interleaved float samples: a float32 buffer, or a
+        sequence of numbers. The samples are copied."""
+        data = samples if isinstance(samples, (bytes, bytearray, memoryview)) or hasattr(samples, "__array_interface__") \
+            else _array.array("f", samples)
+        cdef const float[::1] view = memoryview(data).cast("B").cast("f")
+        if view.shape[0] == 0 or view.shape[0] % channels != 0:
+            raise ValueError("load_samples needs a whole number of frames of %d channels" % channels)
+        return self._ptr.loadSamples(&view[0], view.shape[0] // channels, channels, sample_rate)
+
+    def unload(self, uint32_t clip):
+        """The clip removed, its voices stopped at once."""
+        self._ptr.unload(clip)
+
+    def clip_length(self, uint32_t clip):
+        """The clip's length in seconds; 0 for no clip."""
+        return self._ptr.clipLength(clip)
+
+    def play(self, uint32_t clip, position=None, str bus="world", float volume=1.0, float pitch=1.0,
+             bint loop=False, velocity=(0.0, 0.0, 0.0), float min_distance=1.0, float max_distance=500.0,
+             float rolloff=1.0, float doppler=1.0, float delay=0.0, float fade_in=0.0):
+        """A voice of the clip; 0 for no clip or no free voice. With a
+        `position` it is spatial: its gain falls off as min_distance /
+        (min_distance + rolloff * (d - min_distance)) beyond min_distance, d
+        held at max_distance beyond it, and it is panned and Doppler shifted
+        (by `velocity` relative to the listener's, scaled by `doppler`).
+        Without one it plays as recorded. It starts `delay` seconds of mix
+        time from now and fades in over `fade_in` seconds."""
+        cdef AudioPlayParams params
+        params.bus = _audio_bus(bus)
+        params.volume = volume
+        params.pitch = pitch
+        params.loop = loop
+        params.spatial = position is not None
+        if position is not None:
+            params.position = self._relative(position)
+            params.velocity = _audio_vec3(velocity)
+        params.minDistance = min_distance
+        params.maxDistance = max_distance
+        params.rolloff = rolloff
+        params.doppler = doppler
+        params.delay = delay
+        params.fadeIn = fade_in
+        return self._ptr.play(clip, params)
+
+    def stop(self, uint64_t voice, float fade=0.0):
+        """The voice stopped, fading out over `fade` seconds."""
+        self._ptr.stop(voice, fade)
+
+    def active(self, uint64_t voice):
+        """Whether the voice still holds its slot: waiting for its delay,
+        playing, or fading out."""
+        return self._ptr.active(voice)
+
+    def set_voice(self, uint64_t voice, position=None, velocity=(0.0, 0.0, 0.0), volume=None, pitch=None):
+        """A playing voice's position (with its velocity), volume or pitch."""
+        if position is not None:
+            self._ptr.setVoicePosition(voice, self._relative(position), _audio_vec3(velocity))
+        if volume is not None:
+            self._ptr.setVoiceVolume(voice, volume)
+        if pitch is not None:
+            self._ptr.setVoicePitch(voice, pitch)
+
+    @property
+    def active_voices(self):
+        return self._ptr.activeVoices()
+
+    def set_bus_volume(self, str bus, float volume, float fade=0.0):
+        """The bus's volume, reached linearly over `fade` seconds (at least 5 ms)."""
+        self._ptr.setBusVolume(_audio_bus(bus), volume, fade)
+
+    def bus_volume(self, str bus):
+        return self._ptr.busVolume(_audio_bus(bus))
+
+    def pause_bus(self, str bus):
+        """The bus silent, its voices holding their place."""
+        self._ptr.pauseBus(_audio_bus(bus))
+
+    def resume_bus(self, str bus):
+        self._ptr.resumeBus(_audio_bus(bus))
+
+    def bus_paused(self, str bus):
+        return self._ptr.busPaused(_audio_bus(bus))
+
+    def set_world_lowpass(self, float cutoff_hz, float fade=0.0):
+        """The world bus's low-pass cutoff, reached over `fade` seconds,
+        moving evenly in octaves; held between 10 Hz and 0.45 of the sample
+        rate."""
+        self._ptr.setWorldLowpass(cutoff_hz, fade)
+
+    @property
+    def world_lowpass(self):
+        return self._ptr.worldLowpass()
+
+    def set_listener(self, position, forward, up, velocity=(0.0, 0.0, 0.0)):
+        """The listener's position, facing, up and velocity, in the caller's
+        frame. Its right is forward x up."""
+        for k in range(3):
+            self._listener[k] = position[k]
+        self._ptr.setListener(_audio_vec3(forward), _audio_vec3(up), _audio_vec3(velocity))
+
+    def read(self, uint64_t frames):
+        """Without a device: the next `frames` frames of the mix, as an
+        array.array("f") of interleaved samples. Raises RuntimeError with a
+        device."""
+        if self._ptr.hasDevice():
+            raise RuntimeError("read() pulls the mix of an Audio made with device=False")
+        out = _array.array("f", bytes(4 * frames * self._ptr.channels()))
+        cdef float[::1] view = out
+        cdef uint64_t got = 0
+        if frames > 0:
+            with nogil:
+                got = self._ptr.read(&view[0], frames)
+        return out if got == frames else out[:got * self._ptr.channels()]
+
+
 cdef class Engine:
     """Main engine entry point.
 
@@ -2877,6 +3081,7 @@ cdef class Engine:
     cdef Animation _animation_wrapper
     cdef Ecs _ecs_wrapper
     cdef UI _ui_wrapper
+    cdef Audio _audio_wrapper
 
     # Keep Python references to callbacks to prevent GC
     cdef list _callback_refs
@@ -3085,6 +3290,16 @@ cdef class Engine:
             self._ui_wrapper._owned = False
             self._ui_wrapper._owner = self
         return self._ui_wrapper
+
+    @property
+    def audio(self):
+        """Access sound (Audio), made on first use with the default device.
+        Raises RuntimeError when miniaudio cannot start."""
+        if self._audio_wrapper is None:
+            self._audio_wrapper = Audio.__new__(Audio)
+            self._audio_wrapper._ptr = &self._ptr.getAudio()
+            self._audio_wrapper._owner = self
+        return self._audio_wrapper
 
     # ── Convenience Helpers ───────────────────────────────────
 

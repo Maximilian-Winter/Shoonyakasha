@@ -28,6 +28,7 @@
 #include "FacadeInternal.h"
 
 #include "App/ApplicationBase.h"
+#include "Audio/AudioEngine.h"
 #include "Compute/Compute.h"
 #include "Vulkan/VulkanSwapChain.h"
 #include "ECS/Scene.h"
@@ -68,6 +69,9 @@ struct EngineAPI::Impl {
 
     // setRenderStatsEnabled before run(): (enabled, gpuTiming), applied in onInit
     std::optional<std::pair<bool, bool>> pendingStats;
+
+    // Made on the first getAudio() call.
+    std::unique_ptr<Audio::AudioEngine> audio;
 
     // Made on the first compute() call, shut down after onCleanup.
     std::shared_ptr<Compute::Context> compute;
@@ -430,6 +434,11 @@ EcsAPI& EngineAPI::getEcs() {
             "Use setOnInit() to run ECS setup at the right moment.");
     }
     return *m_impl->ecsAPI;
+}
+
+Audio::AudioEngine& EngineAPI::getAudio() {
+    if (!m_impl->audio) m_impl->audio = std::make_unique<Audio::AudioEngine>();
+    return *m_impl->audio;
 }
 
 UIAPI& EngineAPI::getUI() {
