@@ -201,6 +201,7 @@ class Sound:
     shown: dict = field(default_factory=dict)        # "slate", "system": whether it was shown last frame
     density: float = 1.0               # the air's density at the camera, a share of the surface's
     air_set: tuple = None              # (gain, cutoff Hz) the world bus was last set to
+    hush: bool = False                 # the next toast silent (sounds.alert)
 
 
 @dataclass

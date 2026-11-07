@@ -80,7 +80,9 @@ and landings, the slate and the System screen, and the toasts, each from
 the files in sounds/ named after its entry of sounds.SOUNDS or else a
 placeholder made in code; and the loops (play/loops.py) of the wind, the
 car's engines and cushion, the gun's hum, reentry, the breath and the
-heart, set every frame from the game. The world's sounds fade and dull as the air
+heart, and a storm's rain, set every frame from the game. A meteor's
+impact booms, late by the sound's travel and duller the farther off; on
+the moon it rumbles through the feet nearby. The world's sounds fade and dull as the air
 thins (acoustics.py); in vacuum only the suit's are heard, and through
 it a strike within 3 m.
 

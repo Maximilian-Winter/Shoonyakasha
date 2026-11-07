@@ -6,8 +6,11 @@ game (`update`), fading in and out over LOOP_FADE.
 
 - **wind**: the air moving past the listener (the wind there less the
   player's or the car's velocity): louder, brighter and gustier the
-  faster; above WHISTLE_FROM m/s a whistle joins. Inside the car, half as
-  loud and darker. On the world bus, so the air carries it.
+  faster, and gustier the more of a storm is here; above WHISTLE_FROM m/s
+  a whistle joins. Inside the car, half as loud and darker. On the world
+  bus, so the air carries it.
+- **rain**: as loud as how much of a storm is here (`storm_here`), drumming
+  duller on the car's roof while driving.
 - **car_hum** and **car_cushion**: the hover car's engines, pitch and
   brightness rising with the throttle and the boost, stuttering with the
   tank empty; and the hiss of its cushion as it comes within CUSHION_FROM
@@ -28,7 +31,7 @@ import math
 import numpy as np
 
 from shoonyakasha.planet.character import RUN
-from shoonyakasha.planet.vec import length, sub
+from shoonyakasha.planet.vec import length, normalize, sub
 
 import flight
 from play.core import foot, planet, state, world
@@ -66,6 +69,13 @@ def placeholder(name):
         x = coloured(6.0, 1.0)
     elif name == "wind_whistle":
         x = coloured(4.0, 0.3, 300.0, 9_000.0)
+    elif name == "rain":
+        x = coloured(5.0, 0.2, 400.0, 12_000.0)
+        x /= np.max(np.abs(x))
+        drops = np.zeros_like(x)
+        where = rng.random(len(x)) < 0.004
+        drops[where] = rng.uniform(0.3, 1.0, int(where.sum()))
+        x = 0.6 * x + np.convolve(np.pad(drops, (24, 0), mode="wrap"), np.hanning(24), mode="valid")[:len(x)]
     elif name == "car_hum":
         x0 = t(1.0)
         x = saw(110.0, x0) + 0.8 * saw(111.0, x0) + 0.6 * np.sin(2.0 * np.pi * 55.0 * x0)
@@ -106,6 +116,7 @@ def placeholder(name):
 LOOPS = {
     "wind":         {"bus": "world", "volume": 0.6, "make": placeholder},
     "wind_whistle": {"bus": "world", "volume": 0.35, "make": placeholder},
+    "rain":         {"bus": "world", "volume": 0.6, "make": placeholder},
     "car_hum":      {"bus": "world", "volume": 0.5, "near": 3.0, "far": 250.0, "make": placeholder},
     "car_cushion":  {"bus": "world", "volume": 0.4, "near": 3.0, "far": 120.0, "make": placeholder},
     "gun_hum":      {"bus": "suit", "volume": 0.3, "make": placeholder},
@@ -150,6 +161,7 @@ def update(dt):
     if state.sound.audio is None:
         return
     update_wind()
+    update_rain()
     update_car()
     update_gun()
     update_reentry()
@@ -173,10 +185,18 @@ def airflow():
     return length(sub(wind, foot.physics.character_velocity(foot.player.character)))
 
 
+def storm_here():
+    """How much of the storm is at the camera, 0 to 1 (wind.Storm.at); 0 off the planet."""
+    camera = state.view.position
+    if world.storm is None or world.body_under(camera) is not planet:
+        return 0.0
+    return world.storm.at(normalize(planet.relative(camera)), world.time)
+
+
 def update_wind():
     speed = min(airflow(), 80.0)
     clock = state.sound.clock
-    gust = 1.0 + 0.25 * math.sin(0.8 * clock) * math.sin(0.23 * clock + 1.7)
+    gust = 1.0 + (0.25 + 0.35 * storm_here()) * math.sin(0.8 * clock) * math.sin(0.23 * clock + 1.7)
     level = smoothstep(1.0, 25.0, speed) * gust
     lowpass = min(8_000.0, 250.0 + 90.0 * speed * gust)
     inside = state.vehicle.driving
@@ -186,6 +206,14 @@ def update_wind():
     whistle = smoothstep(WHISTLE_FROM, 35.0, speed) * gust * (0.5 if inside else 1.0)
     hold("wind_whistle", whistle, pitch=0.8 + 0.01 * speed, lowpass=1_800.0 + 60.0 * speed,
          highpass=1_200.0 + 40.0 * speed)
+
+
+def update_rain():
+    level = storm_here()
+    if state.vehicle.driving:
+        hold("rain", 0.8 * level, pitch=0.8, lowpass=1_500.0)
+    else:
+        hold("rain", level, lowpass=8_000.0, highpass=300.0)
 
 
 def update_car():

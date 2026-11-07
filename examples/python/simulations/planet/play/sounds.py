@@ -24,6 +24,14 @@ low-pass follow the air's density at the camera, reached over AIR_FADE,
 silent in vacuum (on the moon, in orbit). There a hit or a split within
 acoustics.CONTACT_DISTANCE of the camera plays "contact" through the suit
 instead (`strike`), and one farther off plays nothing.
+
+In air a world sound at a point (`strike`) starts late by the time sound
+takes to come from there (acoustics.sound_delay) and is dulled by the
+distance (acoustics.distance_cutoff); with the time warp above
+WARP_SILENT it is not played. A meteor's impact (`boom`) is such a
+sound, and in vacuum, standing on the ground within its reach
+(acoustics.rumble_volume), a low rumble through the feet. `alert` plays a
+sound for the toast that follows it in place of the toast's own.
 """
 
 import math
@@ -37,7 +45,7 @@ from shoonyakasha.planet.vec import add, length, sub
 import acoustics
 import hud as hud_module
 from play.core import GOOD_TOAST, HERE, engine, foot, settings, state, world
-from play import walking
+from play import spaceflight, walking
 
 RATE = 48000
 SOUND_DIR = os.path.join(HERE, "sounds")
@@ -51,6 +59,8 @@ SOUNDS = {
     "hit":           {"bus": "world", "volume": 1.0, "spread": 0.08, "near": 1.0, "far": 60.0},
     "split":         {"bus": "world", "volume": 1.0, "spread": 0.05, "near": 4.0, "far": 300.0},
     "contact":       {"bus": "suit", "volume": 0.6, "spread": 0.1},
+    "meteor_boom":   {"bus": "world", "volume": 0.9, "spread": 0.1, "near": 60.0, "far": 6_000.0},
+    "meteor_boom_large": {"bus": "world", "volume": 1.0, "spread": 0.05, "near": 300.0, "far": 15_000.0},
     "footstep":      {"bus": "suit", "volume": 0.3, "spread": 0.1},
     "land":          {"bus": "suit", "volume": 0.5, "spread": 0.05},
     "slate_open":    {"bus": "ui", "volume": 0.4},
@@ -58,6 +68,7 @@ SOUNDS = {
     "toast":         {"bus": "ui", "volume": 0.3},
     "toast_good":    {"bus": "ui", "volume": 0.45},
     "toast_warning": {"bus": "ui", "volume": 0.45},
+    "pads_closed":   {"bus": "ui", "volume": 0.5},
 }
 
 HIT_SPEED = 1.5          # m/s a prop's speed must fall by in a frame to be heard hitting something
@@ -66,6 +77,7 @@ HIT_MASS = 50.0          # kg at which a hit is neither quieter nor lower
 HIT_GAP = 0.15           # s between one prop's hits
 LAND_AIR = 0.35          # s in the air before touching down is a landing
 AIR_FADE = 0.3           # s the world bus takes to follow the air
+WARP_SILENT = 2.0        # time warp above which world sounds at a point are not played
 
 
 def placeholder(name):
@@ -116,6 +128,16 @@ def placeholder(name):
                 2.0 * crackle * decay(t(0.6), 0.2))
     elif name == "contact":
         x = pad(thump(55.0, 0.18, 0.05), 0.5 * noise(0.12, 60) * decay(t(0.12), 0.03))
+    elif name in ("meteor_boom", "meteor_boom_large"):
+        large = name == "meteor_boom_large"
+        length_s = 3.0 if large else 1.8
+        x = pad(1.2 * thump(30.0 if large else 45.0, length_s, 0.5 if large else 0.3),
+                0.7 * noise(length_s, 40) * decay(t(length_s), 0.8 if large else 0.45),
+                0.6 * noise(0.15, 2) * decay(t(0.15), 0.03))
+    elif name == "pads_closed":
+        beep = t(0.12)
+        x = pad(*(np.pad(np.sin(2 * np.pi * hz * beep) * decay(beep, 0.08), (int(k * 0.16 * RATE), 0))
+                  for k, hz in enumerate((880.0, 660.0, 440.0))))
     elif name == "footstep":
         x = 0.8 * noise(0.07, 24) * decay(t(0.07), 0.02) + 0.3 * thump(110.0, 0.07, 0.02)
     elif name == "land":
@@ -207,7 +229,9 @@ def play(name, position=None, volume=1.0, pitch=1.0, bus=None, **options):
 
 
 def toast(colour):
-    if colour == GOOD_TOAST:
+    if state.sound.hush:
+        state.sound.hush = False
+    elif colour == GOOD_TOAST:
         play("toast_good")
     elif colour == hud_module.WARNING:
         play("toast_warning")
@@ -222,13 +246,36 @@ def split(chunks):
 
 
 def strike(name, position, volume=1.0, pitch=1.0):
-    """The world sound `name` at `position` (planet space); in vacuum,
-    "contact" through the suit when within acoustics.CONTACT_DISTANCE of
-    the camera, else none."""
+    """The world sound `name` at `position` (planet space), late by the
+    sound's travel and dulled by the distance; in vacuum, "contact" through
+    the suit when within acoustics.CONTACT_DISTANCE of the camera, else
+    none; none with the time warp above WARP_SILENT."""
+    if spaceflight.time_warp() > WARP_SILENT:
+        return 0
+    distance = length(sub(position, state.view.position))
     if state.sound.density > acoustics.VACUUM:
-        return play(name, position, volume, pitch)
-    near = acoustics.contact_volume(length(sub(position, state.view.position)))
+        return play(name, position, volume, pitch, delay=acoustics.sound_delay(distance),
+                    lowpass=acoustics.distance_cutoff(distance))
+    near = acoustics.contact_volume(distance)
     return play("contact", volume=volume * near, pitch=pitch) if near > 0.0 else 0
+
+
+def boom(point, large):
+    """A meteor's impact at `point` (planet space): its boom (`strike`),
+    or in vacuum, with the player on the ground, its rumble through the
+    feet."""
+    if state.sound.density > acoustics.VACUUM:
+        return strike("meteor_boom_large" if large else "meteor_boom", point)
+    felt = acoustics.rumble_volume(length(sub(point, state.view.position)), large)
+    if felt > 0.0 and foot.player is not None and foot.player.on_ground:
+        return play("contact", volume=felt, pitch=0.5)
+    return 0
+
+
+def alert(name):
+    """The sound `name`, the next toast silent."""
+    play(name)
+    state.sound.hush = True
 
 
 def air_share(point):
@@ -259,6 +306,7 @@ def update(dt):
         return
     right, up, forward = walking.view_basis()
     s.audio.set_listener(state.view.position, forward, up)
+    s.hush = False
     update_air()
     update_gun()
     update_hits(dt)

@@ -47,6 +47,26 @@ class AirAudioTest(unittest.TestCase):
         vacuum_height = -planet.scale_height * math.log(acoustics.VACUUM)
         self.assertEqual(acoustics.air_audio(share(vacuum_height + 1.0))[0], 0.0)
 
+    def test_sound_delay(self):
+        self.assertAlmostEqual(acoustics.sound_delay(3_430.0), 10.0)
+        self.assertEqual(acoustics.sound_delay(0.0), 0.0)
+
+    def test_distance_cutoff(self):
+        self.assertEqual(acoustics.distance_cutoff(1.0), acoustics.NEAR_CUTOFF)
+        self.assertAlmostEqual(acoustics.distance_cutoff(acoustics.NEAR_DISTANCE), acoustics.NEAR_CUTOFF)
+        self.assertAlmostEqual(acoustics.distance_cutoff(acoustics.FAR_DISTANCE), acoustics.FAR_CUTOFF)
+        last = acoustics.NEAR_CUTOFF
+        for d in (50.0, 300.0, 1_000.0, 4_000.0):
+            self.assertLess(acoustics.distance_cutoff(d), last)
+            last = acoustics.distance_cutoff(d)
+        self.assertEqual(acoustics.distance_cutoff(1.0e7), acoustics.LOWEST_CUTOFF)
+
+    def test_rumble_volume(self):
+        self.assertEqual(acoustics.rumble_volume(0.0, True), 1.0)
+        self.assertAlmostEqual(acoustics.rumble_volume(300.0, True), 0.8)
+        self.assertEqual(acoustics.rumble_volume(300.0, False), 0.0)
+        self.assertEqual(acoustics.rumble_volume(2_000.0, True), 0.0)
+
     def test_contact_volume(self):
         self.assertEqual(acoustics.contact_volume(0.0), 1.0)
         self.assertAlmostEqual(acoustics.contact_volume(0.5 * acoustics.CONTACT_DISTANCE), 0.5)

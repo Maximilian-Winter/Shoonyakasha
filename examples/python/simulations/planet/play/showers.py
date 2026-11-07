@@ -1,7 +1,7 @@
 """
 Meteor showers (events.py): planning the next over the body the camera
 is over, measuring its impacts' ground, the meteors drawn as glows, each
-impact's flash, shake, plume and push, the meteorite and rocks left, and
+impact's flash, shake, plume, push and boom (sounds.boom), the meteorite and rocks left, and
 which props are too hot to grab.
 """
 
@@ -18,6 +18,7 @@ import events
 from hud import bearing, distance_text
 from play.core import (METEOR_MARKER, PLUME_PUFFS, SMALL_PUFFS, args, bodies, engine, foot, planet, settings,
                        state, world)
+from play import sounds
 
 SHOWER_TRIES = 4                # times a shower whose large impact falls in water is planned again
 FALL_SPEED = 5.0                # m/s down a meteorite or rock flies from its impact until its ground is measured
@@ -223,7 +224,8 @@ def strike(k):
     (events.keep, PlanetWorld.set_craters) and leaves its meteorite, a small
     one its rock (meteor_rock), hot (events.LARGE_COOLING or
     SMALL_COOLING); the props in the bubble within PUSH_REACH times its
-    blast's radius (the crater's, or SMALL_BLAST) pushed away (`push`); a
+    blast's radius (the crater's, or SMALL_BLAST) pushed away (`push`); its
+    boom (sounds.boom); a
     flash of FLASH_ALPHA, full within FLASH_REACH and falling with the
     square of the distance beyond, and within SHAKE_REACH the view shaken by
     up to SHAKE_ANGLE, both SMALL_LIGHT as strong for a small impact; and a
@@ -244,6 +246,7 @@ def strike(k):
     state.showers.hot[id(prop)] = (world.time, events.LARGE_COOLING if impact.large else events.SMALL_COOLING)
     blast = impact.crater[0] if impact.large else SMALL_BLAST
     push(point, PUSH_REACH * blast)
+    sounds.boom(point, impact.large)
     light = 1.0 if impact.large else SMALL_LIGHT
     distance = length(sub(point, state.view.position))
     state.showers.flash = (world.time, FLASH_ALPHA * light * min(1.0, (FLASH_REACH / max(distance, 1.0)) ** 2))

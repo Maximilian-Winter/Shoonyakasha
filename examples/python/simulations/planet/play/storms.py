@@ -12,7 +12,7 @@ import events
 import hovercar
 import hud as hud_module
 from play.core import GOOD_TOAST, RAIN_DROPS, STORM_WARNING, args, planet, state, world
-from play import showers, spaceflight
+from play import showers, sounds, spaceflight
 
 BUFFET_WIND = 20.0              # m/s of wind at the car beyond which it is buffeted
 BUFFET = 1.5                    # m/s^2 per m/s of wind beyond BUFFET_WIND, at most
@@ -67,6 +67,7 @@ def update_storms(dt):
     for o in [o for o in state.site.outposts if o.body is planet]:
         if o.name not in state.storms.warned and (closed(o) or storm.at(o.direction, world.time + STORM_WARNING) > 0.0):
             state.storms.warned.add(o.name)
+            sounds.alert("pads_closed")
             hud.toast("Storm approaching %s: landing pads closed" % o.name, hud_module.WARNING)
         if closed(o):
             state.storms.closed.add(o.name)
