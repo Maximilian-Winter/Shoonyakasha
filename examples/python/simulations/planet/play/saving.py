@@ -27,7 +27,8 @@ def save_game(base=None, quiet=False):
     the pin, the reputations and the counts; which crates are couriers'),
     the explored map, the meteorites' craters ("modifiers"), the next
     shower's start ("events"; a shower under way, its start) and which
-    props are hot and since when, and which is the last meteorite.
+    props are hot and since when, which is the last meteorite, and the log
+    and the ledger (gamelog.py).
     Returns the data, or None without a player or the car driven."""
     player = foot.player
     if player is None and not state["driving"]:
@@ -74,6 +75,8 @@ def save_game(base=None, quiet=False):
                    "storm": events.storm_record(world.storm) if world.storm is not None else None},
         "hot": [list(state["hot"][id(p)]) if id(p) in state["hot"] else None for p in foot.props.all],
         "meteorite": next((n for n, p in enumerate(foot.props.all) if p is state["meteorite"]), None),
+        "log": state["log"].record(),
+        "ledger": state["ledger"].record(),
     }
     data = save.write(base or save_base, data, state["map"].grids)
     state["last_save"] = data
@@ -151,6 +154,8 @@ def load_game(base=None):
     state["poi_want_at"], state["poi_asked"], state["poi_asking"] = None, None, []
     state["parts"] = dict(data.get("parts", {}))
     state["survey_data"] = data.get("survey_data", 0.0)
+    state["log"].restore(data.get("log"))
+    state["ledger"].restore(data.get("ledger"), None)
     save.restore_grids(state["map"], arrays, by_name, Grid)
     state["walked_counted"] = None
     game = data["game"]
@@ -185,7 +190,6 @@ def load_game(base=None):
     for c in state["contracts"]:
         if c.kind == "recovery":
             contracting.place_pod(c, done=contracting.pod_key(c) in state["pods"].values() or c.id in held)
-    state["contracts_shown"] = None
     state["car_poses"] = None
     p = data["player"]
     if p is None or (record is not None and record["driving"]):
@@ -241,7 +245,7 @@ def restore_space(record):
 
 def autosave(dt):
     """With autosave on, the game saved after AUTOSAVE_SECONDS of play."""
-    if not settings["autosave"] or args.check or foot.player is None or state["menu"].visible:
+    if not settings["autosave"] or args.check or foot.player is None or state["system"].visible:
         return
     state["autosave_in"] -= dt
     if state["autosave_in"] <= 0.0:

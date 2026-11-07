@@ -370,6 +370,7 @@ class Hud:
         self.fuel_shown = 0.0         # s the jet fuel stays shown
         self.card = None              # (label, title, fraction or None, progress, due)
         self.speed = fs.Roll()
+        self.on_toast = None          # told of each toast (`toast`)
 
     def show(self, on):
         self.ui.set_visible(self.canvas, on)
@@ -379,10 +380,14 @@ class Hud:
         self.ui.set_canvas_scaling(self.canvas, sk.CANVAS_SCALE_WITH_SCREEN,
                                    reference_size=(REFERENCE_SIZE[0] / s, REFERENCE_SIZE[1] / s))
 
-    def toast(self, text, colour=ACCENT, detail=None):
-        """A message at the top right, with a dot of `colour` and `detail` at its right."""
+    def toast(self, text, colour=ACCENT, detail=None, kind="world"):
+        """A message at the top right, with a dot of `colour` and `detail` at
+        its right; handed to `on_toast(text, colour, detail, kind)` when set
+        (`kind` one of gamelog.KINDS)."""
         self.toasts.append([text, colour, detail, fs.TOAST_SECONDS + fs.TOAST_FADE, 0.0])
         del self.toasts[:-MAX_TOASTS]
+        if self.on_toast is not None:
+            self.on_toast(text, colour, detail, kind)
 
     def pinned(self, label, title, fraction=None, progress=None, due=None):
         """The pinned goal at the top left: its `label`, `title`, progress

@@ -1,8 +1,8 @@
 """
 Buying and selling at the outposts: the car's fuel (filled on a pad,
 called off the pads), selling the car's cargo and survey data, the
-refinery, the upgrades and the parameters they give, and the Car, Outpost
-and Upgrades tabs.
+refinery, the upgrades and the parameters they give, and the items of the
+slate's Vehicle, Market and Workshop apps.
 """
 
 from shoonyakasha.planet.gravity_gun import GunParams
@@ -46,7 +46,7 @@ def fuel_offer():
 
 def car_note(text, colour=GOOD_TOAST):
     state["car_note"] = text
-    state["hud"].toast(text[0].upper() + text[1:], colour)
+    state["hud"].toast(text[0].upper() + text[1:], colour, kind="money")
 
 
 def fill_tank():
@@ -102,7 +102,7 @@ def update_fuel_call():
     car = state["car"]
     if car is not None:
         if car.dry() and not state["was_dry"]:
-            state["hud"].toast("The car is out of fuel: call fuel from the menu (Escape, Car)", hud_module.WARNING)
+            state["hud"].toast("The car is out of fuel: call fuel from the slate (Tab, Vehicle)", hud_module.WARNING)
         state["was_dry"] = car.dry()
     call = state["fuel_call"]
     if call is None or world.time < call["due"]:
@@ -120,7 +120,7 @@ def update_fuel_call():
 
 
 def car_items():
-    """The Car tab: its fuel, where it is, filling the tank on a pad and calling fuel off them."""
+    """The Vehicle app's items: its fuel, where it is, filling the tank on a pad and calling fuel off them."""
     def fuel():
         car = state["car"]
         return "-" if car is None else "%.0f / %.0f kg" % (car.fuel, car.params.fuel_capacity)
@@ -180,11 +180,11 @@ def sell_car_cargo():
     outpost, car = car_outpost(), state["car"]
     if outpost is None:
         state["trade_note"] = "the car is not on an outpost's pad"
-        state["hud"].toast("The car is not on an outpost's pad", hud_module.WARNING)
+        state["hud"].toast("The car is not on an outpost's pad", hud_module.WARNING, kind="money")
         return
     if storms.closed(outpost):
         state["trade_note"] = storms.closed_note(outpost)
-        state["hud"].toast(state["trade_note"], hud_module.WARNING)
+        state["hud"].toast(state["trade_note"], hud_module.WARNING, kind="money")
         return
     ore = [item for item in hold_ore() if not contracting.deliver(outpost, item)]
     car.cargo = [item for item in car.cargo if "contract" in item]
@@ -197,12 +197,14 @@ def sell_car_cargo():
     kg = sum(item["mass"] for item in ore)
     state["sold_kg"] += kg
     state["earned"] += credits
+    for item in ore:
+        state["ledger"].sold(item["resource"], item["mass"])
     state["trade_note"] = "sold %.0f kg of ore at %s for %s cr" % (kg, outpost.name, format(int(round(credits)), ","))
-    state["hud"].toast(state["trade_note"][0].upper() + state["trade_note"][1:], GOOD_TOAST)
+    state["hud"].toast(state["trade_note"][0].upper() + state["trade_note"][1:], GOOD_TOAST, kind="money")
 
 
 def outpost_items():
-    """The Outpost tab: the outpost whose pad the car is on, its price for
+    """The Market app's items: the outpost whose pad the car is on, its price for
     each resource at grade 1 (iridium from the planet's meteorites), the
     car's cargo, what its ore would fetch, and selling it."""
     def here():
@@ -270,7 +272,7 @@ def refine_ice():
         note = "the tank is full"
     if note is not None:
         state["trade_note"] = note
-        state["hud"].toast(note[0].upper() + note[1:], hud_module.WARNING)
+        state["hud"].toast(note[0].upper() + note[1:], hud_module.WARNING, kind="money")
         return
     wanted = (car.params.fuel_capacity - car.fuel) * outposts.REFINE_ICE
     taken = 0.0
@@ -284,7 +286,7 @@ def refine_ice():
             break
     car.fuel = min(car.params.fuel_capacity, car.fuel + taken / outposts.REFINE_ICE)
     state["trade_note"] = "refined %.0f kg of ice into %.1f kg of fuel" % (taken, taken / outposts.REFINE_ICE)
-    state["hud"].toast(state["trade_note"][0].upper() + state["trade_note"][1:], GOOD_TOAST)
+    state["hud"].toast(state["trade_note"][0].upper() + state["trade_note"][1:], GOOD_TOAST, kind="money")
 
 
 def sell_survey():
@@ -305,7 +307,7 @@ def sell_survey():
     state["survey_data"] = 0.0
     state["earned"] += credits
     state["trade_note"] = "sold survey data at %s for %s cr" % (outpost.name, format(int(round(credits)), ","))
-    state["hud"].toast(state["trade_note"][0].upper() + state["trade_note"][1:], GOOD_TOAST)
+    state["hud"].toast(state["trade_note"][0].upper() + state["trade_note"][1:], GOOD_TOAST, kind="money")
 
 
 def base_params():
@@ -348,14 +350,14 @@ def buy_upgrade(upgrade):
         reason = upgrades.refusal(upgrade, state["owned"], market.credits, state["parts"])
     if reason is not None:
         state["upgrade_note"] = "%s: %s" % (upgrade.name, reason)
-        state["hud"].toast(state["upgrade_note"], hud_module.WARNING)
+        state["hud"].toast(state["upgrade_note"], hud_module.WARNING, kind="money")
         return
     market.credits -= upgrade.cost
     for part, n in upgrade.parts.items():
         state["parts"][part] -= n
     apply_upgrades(state["owned"] | {upgrade.key})
     state["upgrade_note"] = "bought %s for %s cr" % (upgrade.name, format(int(round(upgrade.cost)), ","))
-    state["hud"].toast(state["upgrade_note"][0].upper() + state["upgrade_note"][1:], GOOD_TOAST)
+    state["hud"].toast(state["upgrade_note"][0].upper() + state["upgrade_note"][1:], GOOD_TOAST, kind="money")
 
 
 def upgrade_text(upgrade):
@@ -384,7 +386,7 @@ def parts_held():
 
 
 def upgrade_items():
-    """The Upgrades tab: where, the credits and the parts held, and for
+    """The Workshop app's items: where, the credits and the parts held, and for
     each upgrade the walker offers (WALKER_UPGRADES) a button to buy it and
     a line of what it costs and changes, the gun's and the suit's in one
     column and the car's in another."""

@@ -22,6 +22,7 @@ from shoonyakasha.planet.world import FOV
 import carview
 import config
 import fieldslate as fs
+import gamelog
 import flight
 import hovercar
 import pois
@@ -127,7 +128,11 @@ state = {
     "ore_seen": 0,                # 1 once an ore rock was within ORE_SEEN_RANGE
     "waypoints": 0,               # waypoints reached
     "objectives": Objectives(),
-    "menu": None,                 # the menu (terminal.Terminal): pause, settings, controls, the start
+    "system": None,               # the System screen (slate.SystemScreen): the pause
+    "start": None,                # the start's screen (slate.SystemScreen)
+    "slate": None,                # the slate (slate.Slate)
+    "log": gamelog.Log(),         # what happened, for the slate's Log
+    "ledger": gamelog.Ledger(),   # the credits earned and spent and the ore sold by resource
     "starting": False,            # the start's menu is up: no player until Continue or New game
     "loading": None,              # a save's player record waiting for the ground under it
     "market_record": None,        # a save's credits and supplies waiting for the outposts' survey
@@ -178,7 +183,6 @@ state = {
     "crate_velocity": {},         # id of a courier's crate: its velocity last frame
     "survey_in": 0.0,             # s until the survey contracts' shares are measured again
     "contract_note": "",          # the last contract accepted, ended or refused, for the Contracts tab
-    "contracts_shown": None,      # what the Contracts tab was last built for
     "shower": None,               # the next or current meteor shower (events.Shower)
     "shower_body": None,          # the world body it falls on; None: the planet
     "shower_rng": random.Random(),

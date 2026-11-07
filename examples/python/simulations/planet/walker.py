@@ -48,14 +48,24 @@ CRATE_MASS kg crates stand west of the blocks to throw. Meeting an
 objective (objectives.GOALS), a sale and a reached waypoint show as
 toasts.
 
-The menu (terminal.py): Escape opens it, and F1 opens it on the
-controls; the world's clock and the player stand still behind it. Its
-System tab has Resume, Save game, Load game and Quit beside how the game
-stands; its Settings tab the settings (config.py), kept in
-walker_config.json: the mouse's sensitivity, inverted look, the head bob,
-the field of view, the HUD's scale, the window's size (taken at the next
-start), the render scale, anti-aliasing, the clouds and autosave; its
-Controls tab the controls.
+The slate (slate.py, play/apps.py): Tab opens it and closes it; the
+world runs on behind it while the player and the car wait. Its apps,
+switched by Q and E or a click on the rail: Overview (where the player
+is, the pinned contract or the objective, the suit, the car, the points
+of interest near and the storm and meteor shower coming), Market,
+Contracts, Workshop and Vehicle (the outpost's, the contracts', the
+upgrades' and the car's items), Map (the full map, M) and Log (the
+toasts as they came, gamelog.Log, filtered by kind, with the credits
+earned and spent and the ore sold by kind, gamelog.Ledger).
+
+The System screen (slate.SystemScreen, play/menus.py): Escape opens it,
+and F1 opens it on the controls; the world's clock and the player stand
+still behind it, the only pause. Resume, Save and Load (the last save),
+Settings (config.py, kept in walker_config.json: the mouse's
+sensitivity, inverted look, the head bob, the field of view, the HUD's
+scale, the window's size (taken at the next start), the render scale,
+anti-aliasing, the clouds and autosave), Controls and Quit to desktop;
+with Resume chosen, how the game stands.
 
 Saving (save.py): F5 or Save game writes the game to walker_save.json
 and walker_save.npz: the clock, the player, the crates and loose rocks,
@@ -63,12 +73,14 @@ the rocks taken from the scatter, the credits and the outposts' supplies,
 the objectives and the game's numbers, the waypoint, the car (whether it
 is driven, its fuel and its cargo), the upgrades owned, the day's offset,
 the suit's reserve and health, the explored map, the meteorites' craters,
-the next shower's start and which rocks are hot. F9 or Load game puts it back; the player comes back LOAD_LIFT above
+the next shower's start, which rocks are hot, the log and the ledger. F9
+or Load puts it back; the player comes back LOAD_LIFT above
 the ground where it stood once that ground is measured. With autosave on,
 the game is saved every AUTOSAVE_SECONDS of play, on getting out of the
 car parked on an outpost's pad, on Quit and as the window closes. The
-save is of save.VERSION; one of version 1 is migrated as it is read. When a save exists, the walker starts on a menu with
-Continue (the save loaded) and New game.
+save is of save.VERSION; one of version 1 is migrated as it is read. When
+a save exists, the walker starts on the start's screen: a card of the
+save, Continue (the save loaded), New game, Settings and Quit.
 
 The wind (PlanetWorld.wind_at): the car flies in it at its height above
 the ground (`step_car`; on its cushion it does not move it), the props are
@@ -92,7 +104,7 @@ walks there. The save keeps the car's body and its space mode.
 
 The car's fuel (hovercar.py's CarParams and fuel): the HUD shows its tank
 (FUEL) while driving; dry, it settles onto its cushion and only steers,
-and a toast says so. The menu's Car tab shows the fuel, where the car is
+and a toast says so. The slate's Vehicle app shows the fuel, where the car is
 and the credits, and fills the tank at the outpost whose pad the car is
 on (`fill_tank`, trade.Market.buy_fuel) or calls fuel to it off the
 pads, on its cushion, from the nearest outpost on the planet
@@ -103,15 +115,15 @@ The car's hold (hovercar.Car.cargo): getting in loads the loose ore
 rocks lying in the cargo net behind the parked car (CAR_NET_CENTRE,
 CAR_NET_HALF, shown by four posts; `in_net`, `load_cargo`), and the
 contracts' crates, each that fits (hovercar.Car.can_take), a rock with
-where it was first seen; the rest stay in the net. The menu's Outpost
-tab shows the outpost whose pad the car is on, its price for each
+where it was first seen; the rest stay in the net. The slate's Market
+app shows the outpost whose pad the car is on, its price for each
 resource at grade 1, the car's cargo and what its ore would fetch, and
 sells the ore (`sell_car_cargo`, trade.sale); at the refinery
 (outposts.REFINERY) it makes the ice in the hold fuel (`refine_ice`). The
 save keeps the cargo.
 
-Upgrades (upgrades.py, the "car" and "gun" groups): the menu's Upgrades
-tab has a button for each, bought with the car or the player's feet on
+Upgrades (upgrades.py, the "car" and "gun" groups): the slate's Workshop
+app has a button for each, bought with the car or the player's feet on
 an outpost's pad (`at_outpost`, `buy_upgrade`), and a line of its cost or
 why it cannot be bought and what it changes, from now to after. The
 upgrades owned give the effective car and gun parameters
@@ -133,14 +145,14 @@ in reach (`usable_spot`, `use_spot`): a beacon reveals the map around it
 (ExploredMap.reveal) and gives survey data, a wreck's spots and a rig's
 crates give parts (a rig's ore rocks too), an arch gives survey data. A
 pod's crate settled on an outpost's pad sells (`sell_pods`). Each map
-cell walked (not revealed) is CELL_SURVEY of survey data; the Outpost
-tab sells it (`sell_survey`, trade.survey_sale). Parts pay for upgrades
-with the credits (the Upgrades tab offers WALKER_UPGRADES: the car's,
+cell walked (not revealed) is CELL_SURVEY of survey data; the Market
+app sells it (`sell_survey`, trade.survey_sale). Parts pay for upgrades
+with the credits (the Workshop app offers WALKER_UPGRADES: the car's,
 the gun's and the suit's). The save keeps the points' states, the
 parts, the survey data and which crates are pods. Loose ore rocks and
 pods sell only once settled (`settled`).
 
-Contracts (contracts.py): the menu's Contracts tab shows the offers of
+Contracts (contracts.py): the slate's Contracts app shows the offers of
 the outpost whose pad the car or the player is on (contracts.offers for
 the day, which turns at dawn, clock.day), each with Accept, and the
 active contracts (contracts.MAX_ACTIVE at most), each with Pin, and
@@ -222,7 +234,8 @@ Keys:
   W A S D                walk; left Shift run; left Ctrl crouch
   Space                  jump on the ground, jet in the air
   mouse                  look (captured while playing)
-  Escape                 the menu: the world stands still
+  Tab                    the slate: Q and E switch its apps; the world runs on
+  Escape                 the System screen: the world stands still
   P                      screenshot into walker_captures/
   right mouse            gravity gun: grab, or pull from farther; again: drop
   left mouse             punt what is held or in front; hold while holding to charge
@@ -231,7 +244,7 @@ Keys:
   M                      the full map (Escape closes it); left click a waypoint, right click clears it
   F                      into the car near it; out of it when slow and low
   F5, F9                 save, load
-  F1                     the menu on the controls
+  F1                     the System screen on the controls
 
 Gamepad: left stick walk, right stick look, A jump and jet, left trigger
 grab, right trigger punt, the bumpers the hold distance.
@@ -259,11 +272,11 @@ import save
 from outposts import home_outpost
 from explored_map import ExploredMap, MapView
 from hud import Hud
-from terminal import Terminal
 from viewmodel import Glows, Viewmodel
 from play.core import RAIN_DROPS, args, blocks, bodies, box, engine, foot, pads, save_base, settings, state, world
-from play import (checks, contracting, economy, exploring, menus, saving, showers, site, spaceflight, storms, survival,
-                  vehicle, walking)
+from play import (apps, checks, contracting, economy, exploring, menus, saving, showers, site, spaceflight, storms,
+                  survival, vehicle, walking)
+import slate
 
 METEOR_DISCS, METEOR_STREAKS = 96, 48
 HOLDS = (None, "prograde", "retrograde")
@@ -274,22 +287,24 @@ def frame(dt):
     world.begin_frame(state["position"])
     site.update_outposts()
     walking.maybe_spawn()
-    paused = state["menu"].visible
-    state["menu"].update(engine.input)
+    paused = state["system"].visible or state["start"].visible
     elapsed = dt                 # the frame's real time; the world's stands still while paused
+    for screen in (state["start"], state["system"], state["slate"]):
+        screen.update(engine.input, elapsed)
+    covered = state["map_view"].open or state["slate"].visible   # the world runs, the player waits
     if args.check:
         checks.run_check(elapsed)
-    elif state["driving"] and state["space"] is not None and not paused and not state["map_view"].open:
+    elif state["driving"] and state["space"] is not None and not paused and not covered:
         carview.read_space_controls(engine.input, state["space_controls"], elapsed)
-    elif state["driving"] and not paused and not state["map_view"].open:
+    elif state["driving"] and not paused and not covered:
         vehicle.read_car_controls()
-    elif foot.player is not None and not paused and not state["map_view"].open:
+    elif foot.player is not None and not paused and not covered:
         foot.read_controls(engine.input)
         survival.slow_down()
         walking.ignore_held_buttons()
         walking.read_bumpers()
         walking.read_pad_enter()
-    if state["driving"] and (paused or state["map_view"].open):
+    if state["driving"] and (paused or covered):
         state["car_controls"] = hovercar.CarControls()
     if paused:
         dt = 0.0
@@ -297,7 +312,7 @@ def frame(dt):
     world.time += dt
     latency = world.probe_latency * state["frame_ms"] / 1000.0
     foot.props.fly(world.time - clock, latency)
-    active = foot.player is not None and not state["map_view"].open and not paused
+    active = foot.player is not None and not covered and not paused
     vehicle.step_car(dt)
     viewpoint = state["position"]
     if state["driving"]:
@@ -364,7 +379,10 @@ def on_init():
     state["map"] = ExploredMap(world)
     state["map_view"] = MapView(engine)
     state["map_view"].show(False)
-    state["menu"] = Terminal(engine, "Paused", menus.menu_tabs(), subtitle=menus.menu_subtitle, close_text="ESC  RESUME")
+    state["hud"].on_toast = apps.log_toast
+    state["slate"] = slate.Slate(engine, apps.slate_apps(), system=lambda: menus.set_paused(True))
+    state["system"] = menus.system_screen()
+    state["start"] = menus.start_screen()
     menus.apply_settings()
     if not args.check and save.exists(save_base):
         try:
@@ -372,11 +390,8 @@ def on_init():
         except save.SaveError as error:
             print("[walker] %s" % error, flush=True)
     if state["last_save"] is not None:
-        menu = state["menu"]
         state["starting"] = True
-        menu.title, menu.close_text = "Walker", ""
-        menu.set_tabs([("Start", menus.start_items())])
-        menu.show(True)
+        state["start"].show(True)
     _, up, _, north = world.site_frame()
     state["position"] = add(world.site_ground(), scale(up, 5.0))
     state["forward"] = north
@@ -384,46 +399,70 @@ def on_init():
 
 
 def on_key(key):
-    """F1 the menu on the controls, M the map, Escape the menu, P a screenshot, F the car (in or out),
-    G its space mode (in or out), in space mode T the assist, H the nose hold and , . the time warp, F5 a save, F9 a
-    load; the start's menu waits for its buttons."""
-    view, menu = state["map_view"], state["menu"]
+    """The start's screen takes its keys (Up, Down, Enter). On the System
+    screen: Escape resumes, F1 shows the controls, F5 and F9 save and load,
+    the rest move its choice. With the slate open: Tab closes it, Escape
+    opens the System screen, M the full map, Q and E switch its apps. Else:
+    Tab the slate, F1 the controls, M the map, Escape the System screen (or
+    closes the map), P a screenshot, F the car (in or out), G its space mode
+    (in or out), in space mode T the assist, H the nose hold and , . the
+    time warp, F5 a save, F9 a load."""
+    view, system, tablet = state["map_view"], state["system"], state["slate"]
+    playing = foot.player is not None or state["driving"]
     if state["starting"]:
+        state["start"].key(key)
         return
-    if key == keys.F1 and (foot.player is not None or state["driving"]):
-        controls = menu.tab_named("Controls")
-        menus.set_paused(not (menu.visible and menu.tab == controls), "Controls")
-    elif key == keys.M and (foot.player is not None or state["driving"]) and not menu.visible:
-        view.set_open(not view.open)
-    elif key == keys.ESCAPE and view.open:
-        view.set_open(False)
-    elif key == keys.P:
+    if key == keys.P:
         walking.take_capture()
-    elif key == keys.F and not menu.visible and not view.open:
-        if state["driving"]:
-            vehicle.leave_car()
-        else:
-            vehicle.enter_car()
-    elif key == keys.G and state["driving"] and not menu.visible:
-        if state["space"] is None:
-            spaceflight.enter_space()
-        else:
-            spaceflight.leave_space()
-    elif key == keys.T and state["space"] is not None and not menu.visible:
-        controls = state["space_controls"]
-        controls.assist = not controls.assist
-        state["hud"].toast("Assist %s" % ("on" if controls.assist else "off"))
-    elif key in (keys.COMMA, keys.PERIOD) and state["space"] is not None and not menu.visible:
-        spaceflight.set_warp(1 if key == keys.PERIOD else -1)
-    elif key == keys.H and state["space"] is not None and not menu.visible:
-        state["hold"] = HOLDS[(HOLDS.index(state["hold"]) + 1) % len(HOLDS)]
-        state["hud"].toast("Nose hold: %s" % (state["hold"] or "off"))
-    elif key == keys.ESCAPE and (foot.player is not None or state["driving"]):
-        menus.set_paused(not menu.visible)
     elif key == keys.F5:
         saving.save_game()
     elif key == keys.F9:
         saving.load_game()
+    elif system.visible:
+        if key == keys.ESCAPE:
+            menus.set_paused(False)
+        elif key == keys.F1:
+            menus.set_paused(system.chosen() != "Controls", "Controls")
+        else:
+            system.key(key)
+    elif tablet.opened:
+        if key == keys.TAB:
+            tablet.close()
+        elif key == keys.ESCAPE:
+            menus.set_paused(True)
+        elif key == keys.M:
+            apps.show_map()
+        else:
+            tablet.key(key)
+    elif key == keys.TAB and playing and not view.open:
+        tablet.open()
+    elif key == keys.F1 and playing:
+        menus.set_paused(True, "Controls")
+    elif key == keys.M and playing:
+        view.set_open(not view.open)
+    elif key == keys.ESCAPE and view.open:
+        view.set_open(False)
+    elif key == keys.F and not view.open:
+        if state["driving"]:
+            vehicle.leave_car()
+        else:
+            vehicle.enter_car()
+    elif key == keys.G and state["driving"]:
+        if state["space"] is None:
+            spaceflight.enter_space()
+        else:
+            spaceflight.leave_space()
+    elif key == keys.T and state["space"] is not None:
+        controls = state["space_controls"]
+        controls.assist = not controls.assist
+        state["hud"].toast("Assist %s" % ("on" if controls.assist else "off"))
+    elif key in (keys.COMMA, keys.PERIOD) and state["space"] is not None:
+        spaceflight.set_warp(1 if key == keys.PERIOD else -1)
+    elif key == keys.H and state["space"] is not None:
+        state["hold"] = HOLDS[(HOLDS.index(state["hold"]) + 1) % len(HOLDS)]
+        state["hud"].toast("Nose hold: %s" % (state["hold"] or "off"))
+    elif key == keys.ESCAPE and playing:
+        menus.set_paused(True)
 
 
 def on_mouse_button(button, pressed):

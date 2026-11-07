@@ -474,13 +474,13 @@ def run_check(dt):
                      "passed" if check["bought"] else "FAILED"), flush=True)
             check["sell_ok"] = check["sell_ok"] and check["bought"]
             if args.shot:
-                state["menu"].show(True, state["menu"].tab_named("Upgrades"))
+                state["slate"].open("Workshop")
             return
         if t >= 0.5 or not args.shot:
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_upgrades" + ext)
-                menus.set_paused(False)
+                state["slate"].close(at_once=True)
             check["stage"], check["time"] = "pois", 0.0
     elif stage == "pois":
         if run_poi_check(check, t):
@@ -505,7 +505,8 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_pause" + ext)
-                state["menu"].show(True, state["menu"].tab_named("Car"))
+                menus.set_paused(False)
+                state["slate"].open("Vehicle")
             check["pause_ok"] = pause_ok
             check["stage"], check["time"] = "car_tab", 0.0
     elif stage == "car_tab":
@@ -513,28 +514,42 @@ def run_check(dt):
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_car" + ext)
-                state["menu"].show(True, state["menu"].tab_named("Outpost"))
+                state["slate"].open("Market")
             check["stage"], check["time"] = "outpost_tab", 0.0
     elif stage == "outpost_tab":
         if t >= 0.5 or not args.shot:
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_outpost" + ext)
-                state["menu"].show(True, state["menu"].tab_named("Contracts"))
+                state["slate"].open("Contracts")
             check["stage"], check["time"] = "contracts_tab", 0.0
     elif stage == "contracts_tab":
         if t >= 0.5 or not args.shot:
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_contracts" + ext)
-                state["menu"].show(True, state["menu"].tab_named("Settings"))
+                state["slate"].open("Overview")
+            check["stage"], check["time"] = "overview_tab", 0.0
+    elif stage == "overview_tab":
+        if t >= 0.5 or not args.shot:
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                walking.screenshot(base + "_overview" + ext)
+                state["slate"].open("Log")
+            check["stage"], check["time"] = "log_tab", 0.0
+    elif stage == "log_tab":
+        if t >= 0.5 or not args.shot:
+            if args.shot:
+                base, ext = os.path.splitext(args.shot)
+                walking.screenshot(base + "_log" + ext)
+                menus.set_paused(True, "Settings")
             check["stage"], check["time"] = "settings", 0.0
     elif stage == "settings":
         if t >= 0.5 or not args.shot:
             if args.shot:
                 base, ext = os.path.splitext(args.shot)
                 walking.screenshot(base + "_settings" + ext)
-                state["menu"].show(True, state["menu"].tab_named("Controls"))
+                state["system"].show(True, "Controls")
                 check["stage"], check["time"] = "controls", 0.0
                 return
             check["stage"] = "controls"

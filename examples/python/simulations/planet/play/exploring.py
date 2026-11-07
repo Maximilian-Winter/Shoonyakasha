@@ -121,7 +121,7 @@ def update_pois(dt):
         towards = normalize(sub(poi_point(poi), state["position"]))
         if d <= SCAN_RANGE or (d <= SEEN_RANGE and dot(towards, view) >= SEEN_COS):
             poi.discovered = True
-            state["hud"].toast("Found: %s, %s" % (poi.name, distance_text(d)), POI_MARKER)
+            state["hud"].toast("Found: %s, %s" % (poi.name, distance_text(d)), POI_MARKER, kind="finds")
     update_poi_scenes(here)
     make_poi_props(here)
     update_use(dt)
@@ -222,10 +222,10 @@ def usable_spot():
 
 
 def update_use(dt):
-    """The use key (E, or --check's) held on the usable spot for its time
+    """The use key (E while the HUD shows, or --check's) held on the usable spot for its time
     (pois.SPOTS) uses it (use_spot); let go between uses."""
     spot = state["use_spot"] = usable_spot()
-    held = engine.input.is_key_down(keys.E) or state["check_use"]
+    held = (engine.input.is_key_down(keys.E) and walking.hud_shown()) or state["check_use"]
     if not held:
         state["use_latch"] = False
     if spot is None or not held or state["use_latch"]:
@@ -253,9 +253,9 @@ def use_spot(poi, k):
         if poi.kind == "beacon":
             cells = state["map"].reveal(planet, poi.direction, pois.REVEAL)
             hud.toast("Beacon activated: the map within %s revealed (%d cells), survey data worth %.0f cr"
-                      % (distance_text(pois.REVEAL), cells, value), GOOD_TOAST)
+                      % (distance_text(pois.REVEAL), cells, value), GOOD_TOAST, kind="finds")
         else:
-            hud.toast("Arch scanned: survey data worth %.0f cr" % value, GOOD_TOAST)
+            hud.toast("Arch scanned: survey data worth %.0f cr" % value, GOOD_TOAST, kind="finds")
     else:
         part = pois.parts_for(poi, k)
         state["parts"][part] = state["parts"].get(part, 0) + 1
@@ -267,7 +267,7 @@ def use_spot(poi, k):
                                 pois.RIG_GRADE, poi.resource or resources.FERRITE)
                 state["seen"][id(rock)] = (planet.name, poi.direction)
             text += " and %d ore rocks" % pois.RIG_ROCKS
-        hud.toast(text, GOOD_TOAST)
+        hud.toast(text, GOOD_TOAST, kind="finds")
     if len(poi.done) == len(pois.SPOTS[poi.kind]):
         poi.looted = True
 
@@ -311,7 +311,7 @@ def sell_pods(held):
         if poi is not None:
             poi.looted = True
         state["hud"].toast("Cargo pod delivered to %s: +%s cr" % (outpost.name, format(int(pois.POD_VALUE), ",")),
-                           GOOD_TOAST)
+                           GOOD_TOAST, kind="finds")
 
 
 def poi_markers(body):

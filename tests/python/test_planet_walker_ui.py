@@ -1,9 +1,9 @@
-"""Tests for the walker's interface style and menu
-(examples/python/simulations/planet/scifi.py and terminal.py): panels'
-cut corners, segmented bars, wrapping, key hints' widths and drawing, and
-the menu's sliders, choices and pointer (clicks on buttons, toggles,
-choices and tabs, a slider dragged while the button is held). Plain
-Python: no engine needed.
+"""Tests for the walker's interface style and screens
+(examples/python/simulations/planet/scifi.py and slate.py): panels' cut
+corners, segmented bars, wrapping, key hints' widths and drawing, and the
+items' sliders, choices and pointer (a click does the region under it,
+the topmost first; a held button clicks once; a slider dragged while the
+button is held). Plain Python: no engine needed.
 
     python -m unittest discover -s tests/python
 """
@@ -16,7 +16,7 @@ PLANET_DIR = Path(__file__).resolve().parents[2] / "examples" / "python" / "simu
 sys.path.insert(0, str(PLANET_DIR))
 
 import scifi  # noqa: E402
-import terminal  # noqa: E402
+import slate  # noqa: E402
 from shoonyakasha.toolkit.drawing import Mesh  # noqa: E402
 
 
@@ -63,68 +63,80 @@ class ShapesTest(unittest.TestCase):
 class MenuValuesTest(unittest.TestCase):
     def test_slider_values_snap_and_clamp(self):
         item = {"slider": "S", "min": 0.25, "max": 3.0, "step": 0.05}
-        self.assertAlmostEqual(terminal.slider_value(item, 0.5), 1.65)
-        self.assertEqual(terminal.slider_value(item, -1.0), 0.25)
-        self.assertEqual(terminal.slider_value(item, 2.0), 3.0)
-        self.assertAlmostEqual(terminal.slider_value({"min": 0.0, "max": 10.0}, 0.33), 3.3)
+        self.assertAlmostEqual(slate.slider_value(item, 0.5), 1.65)
+        self.assertEqual(slate.slider_value(item, -1.0), 0.25)
+        self.assertEqual(slate.slider_value(item, 2.0), 3.0)
+        self.assertAlmostEqual(slate.slider_value({"min": 0.0, "max": 10.0}, 0.33), 3.3)
 
     def test_options_wrap(self):
         options = [(1, "a"), (2, "b"), (3, "c")]
-        self.assertEqual(terminal.next_option(options, 3, 1), 1)
-        self.assertEqual(terminal.next_option(options, 1, -1), 3)
-        self.assertEqual(terminal.next_option(options, 9, 1), 1)
+        self.assertEqual(slate.next_option(options, 3, 1), 1)
+        self.assertEqual(slate.next_option(options, 1, -1), 3)
+        self.assertEqual(slate.next_option(options, 9, 1), 1)
 
     def test_value_text(self):
-        self.assertEqual(terminal.value_text({"format": "%.1f"}, 2.25), "2.2")
-        self.assertEqual(terminal.value_text({"show": lambda v: "%d %%" % (100 * v)}, 0.5), "50 %")
+        self.assertEqual(slate.value_text({"format": "%.1f"}, 2.25), "2.2")
+        self.assertEqual(slate.value_text({"show": lambda v: "%d %%" % (100 * v)}, 0.5), "50 %")
+
+
+class Input:
+    def __init__(self, down):
+        self.down = down
+
+    def is_mouse_button_down(self, button):
+        return self.down
+
+
+class Layer:
+    def end(self):
+        pass
 
 
 class PointerTest(unittest.TestCase):
     def setUp(self):
-        self.menu = terminal.Terminal.__new__(terminal.Terminal)
-        self.menu.regions, self.menu.hover, self.menu.drag, self.menu.was_down, self.menu.tab = [], None, None, False, 0
-        self.values = {"on": False, "s": 0.0, "c": 1}
+        surface = self.surface = slate.Surface.__new__(slate.Surface)
+        surface.layer, surface.drag, surface.was_down, surface.point = Layer(), None, False, None
+        self.values = {"s": 0.0}
         self.done = []
-        self.button = {"button": "Go", "do": lambda: self.done.append(1)}
-        self.toggle = {"toggle": "T", "get": lambda: self.values["on"], "set": lambda v: self.values.update(on=v)}
         self.slider = {"slider": "S", "min": 0.0, "max": 1.0, "get": lambda: self.values["s"],
                        "set": lambda v: self.values.update(s=v)}
-        self.choice = {"choice": "C", "options": [(1, "a"), (2, "b")], "get": lambda: self.values["c"],
-                       "set": lambda v: self.values.update(c=v)}
-        self.menu.regions = [(0, 0, 100, 20, self.button, "item"), (0, 30, 100, 20, self.toggle, "item"),
-                             (0, 60, 300, 20, self.slider, "label"), (100, 60, 200, 20, self.slider, "track"),
-                             (0, 90, 100, 20, self.choice, "item"), (0, 90, 20, 20, self.choice, "back"),
-                             (200, 0, 50, 20, 2, "tab")]
 
-    def click(self, point):
-        self.menu.handle(point, True)
-        self.menu.handle(point, False)
+        def grab():
+            surface.drag = (self.slider, 100.0, 200.0)
+            self.slider["set"](slate.slider_value(self.slider, (surface.point[0] - 100.0) / 200.0))
+        self.regions = [(0, 0, 100, 20, lambda: self.done.append("under")),
+                        (0, 0, 50, 20, lambda: self.done.append("over")),
+                        (100, 60, 200, 20, grab)]
 
-    def test_clicks(self):
-        self.click((50, 10))
-        self.assertEqual(self.done, [1])
-        self.click((50, 40))
-        self.assertTrue(self.values["on"])
-        self.click((50, 100))
-        self.assertEqual(self.values["c"], 2)
-        self.click((10, 100))
-        self.assertEqual(self.values["c"], 1)
-        self.click((220, 10))
-        self.assertEqual(self.menu.tab, 2)
+    def frame(self, point, down):
+        """One frame: the regions drawn, the pointer at `point`, the button `down`."""
+        self.surface.regions = list(self.regions)
+        self.surface.point = point
+        self.surface.finish(Input(down))
+
+    def test_a_click_does_the_topmost_region(self):
+        self.frame((20, 10), True)
+        self.frame((20, 10), False)
+        self.assertEqual(self.done, ["over"])
+        self.frame((80, 10), True)
+        self.assertEqual(self.done, ["over", "under"])
+        self.frame((80, 50), False)
+        self.frame((80, 50), True)                       # over nothing
+        self.assertEqual(self.done, ["over", "under"])
 
     def test_a_held_button_clicks_once(self):
         for _ in range(3):
-            self.menu.handle((50, 10), True)
-        self.assertEqual(self.done, [1])
+            self.frame((80, 10), True)
+        self.assertEqual(self.done, ["under"])
 
     def test_slider_follows_while_held(self):
-        self.menu.handle((150, 70), True)
+        self.frame((150, 70), True)
         self.assertAlmostEqual(self.values["s"], 0.25)
-        self.menu.handle((250, 400), True)               # dragged off the row, still held
+        self.frame((250, 400), True)                     # dragged off the row, still held
         self.assertAlmostEqual(self.values["s"], 0.75)
-        self.menu.handle((250, 400), False)
-        self.assertIsNone(self.menu.drag)
-        self.menu.handle((50, 70), True)                 # the label: no change
+        self.frame((250, 400), False)
+        self.assertIsNone(self.surface.drag)
+        self.frame((50, 400), True)                      # over nothing: no change
         self.assertAlmostEqual(self.values["s"], 0.75)
 
 

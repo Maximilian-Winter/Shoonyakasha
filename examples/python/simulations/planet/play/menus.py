@@ -1,15 +1,22 @@
 """
-The menu's tabs (terminal.Terminal): pausing, the settings and applying
-them, the System and Start tabs, the tabs in order and the subtitle, and
-starting or quitting the game.
+The System screen (Esc, the only pause) and the start's screen
+(slate.SystemScreen), the settings and applying them, and starting or
+quitting the game.
+
+The System screen's entries: Resume, Save (its section: the last save,
+and Save now), Load (the last save, and Load), Settings, Controls and
+Quit to desktop; while Resume is chosen, its pane gives how the game
+stands. The start's screen, when a save exists: a card of the save, then
+Continue, New game, Settings and Quit.
 """
 
 import os
 
 import config
-import save
-from play.core import HOVER_BACK, SPACE_HEIGHT, WARP_HEIGHT, args, engine, foot, planet, settings, state, world
-from play import contracting, economy, saving, walking
+import fieldslate as fs
+import slate
+from play.core import HOVER_BACK, SPACE_HEIGHT, WARP_HEIGHT, args, engine, foot, settings, state, world
+from play import apps, saving, walking
 
 HELP_COLUMNS = [
     [("On foot", [
@@ -20,6 +27,7 @@ HELP_COLUMNS = [
         (("M",), "Map: wheel to zoom, left click a waypoint, right click to clear"),
         (("E",), "Use what is here: activate, salvage (hold), open, scan"),
     ]), ("Game", [
+        (("Tab",), "The slate: Q and E switch its apps"),
         (("Esc",), "Pause"),
         (("P",), "Screenshot into walker_captures"),
         (("F5", "F9"), "Save / load"),
@@ -57,15 +65,16 @@ HELP_COLUMNS = [
 ]
 
 
-def set_paused(on, tab="System"):
-    """The menu shown on `tab`, or hidden; the world stands still while it shows."""
-    menu = state["menu"]
+def set_paused(on, section="Resume"):
+    """The System screen shown on `section`, the slate closed; or hidden. The world stands still while it shows."""
+    system = state["system"]
     if not on:
-        menu.show(False)
+        system.show(False)
         if not args.check:
             settings.save()
         return
-    menu.show(True, menu.tab_named(tab))
+    state["slate"].close(at_once=True)
+    system.show(True, section)
 
 
 def apply_settings():
@@ -80,8 +89,9 @@ def apply_settings():
         if world.camera is not None:
             engine.scene.set_camera_fov(world.camera, world.fov)
     s = settings["hud_scale"]
-    for part in (state["hud"], state["map_view"], state["menu"]):
-        part.set_scale(s)
+    for part in (state["hud"], state["map_view"], state["slate"], state["system"], state["start"]):
+        if part is not None:
+            part.set_scale(s)
     engine.render_scale = settings["render_scale"]
     world.taa = settings["anti_aliasing"]
     if world.clouds != settings["clouds"]:
@@ -112,7 +122,7 @@ def toggle(label, name, hint):
 
 
 def settings_items():
-    """The Settings tab's two columns."""
+    """The settings in two columns."""
     get, set_ = setting("window")
     window = {"choice": "Window", "options": [(list(w), "%d x %d" % w) for w in config.WINDOWS], "get": get,
               "set": set_, "hint": "The window's size, taken when the walker next starts."}
@@ -127,7 +137,7 @@ def settings_items():
          ],
         [{"heading": "View"},
          slider("Field of view", "fov", lambda v: "%.0f deg" % v, "The view's height in degrees.", 1.0),
-         slider("HUD scale", "hud_scale", lambda v: "%.2f x" % v, "The size of the HUD, the map and this menu.",
+         slider("HUD scale", "hud_scale", lambda v: "%.2f x" % v, "The size of the HUD, the map and the slate.",
                 0.05),
          {"heading": "Graphics"},
          window,
@@ -140,69 +150,56 @@ def settings_items():
     ])
 
 
-def save_note():
-    data = state["last_save"]
-    return save.describe(data) if data is not None else "No save yet"
-
-
-def system_items():
-    """The System tab: the buttons, and a column of how the game stands."""
+def status_items():
+    """How the game stands."""
     def goal():
         current = state["objectives"].current()
         return current.title if current is not None else "All done"
-    return ("columns", [
-        [{"button": "Resume", "keys": "ESC", "do": lambda: set_paused(False), "hint": "Back to the game."},
-         {"button": "Save game", "keys": "F5", "do": lambda: saving.save_game(), "hint": "Save the game as it is now."},
-         {"button": "Load game", "keys": "F9", "do": lambda: saving.load_game(), "hint": "Go back to the last save."},
-         {"button": "Quit", "do": quit_game, "hint": "Quit the walker; with autosave on, the game is saved first."},
-         {"note": save_note}],
-        [{"heading": "Status"},
-         {"stat": "Objective", "get": goal},
-         {"stat": "Objectives done", "get": lambda: "%d / %d" % (state["objectives"].index,
-                                                                 len(state["objectives"].goals))},
-         {"stat": "Credits", "get": lambda: "%s cr" % format(int(round(state["market"].credits)), ",")},
-         {"stat": "Ore sold", "get": lambda: "%s kg" % format(int(round(state["sold_kg"])), ",")},
-         {"stat": "Cells explored", "get": lambda: format(walking.game_numbers()["cells"], ",")},
-         {"stat": "Waypoints reached", "get": lambda: str(state["waypoints"])},
-         {"stat": "Contracts done / failed", "get": lambda: "%d / %d" % (state["contracts_done"],
-                                                                         state["contracts_failed"])},
-         {"stat": "Outposts found", "get": lambda: str(len(state["outposts"]))}],
-    ])
+    return [{"stat": "Objective", "get": goal},
+            {"stat": "Objectives done", "get": lambda: "%d / %d" % (state["objectives"].index,
+                                                                    len(state["objectives"].goals))},
+            {"stat": "Credits", "get": lambda: fs.credits(state["market"].credits)},
+            {"stat": "Ore sold", "get": lambda: fs.mass(state["sold_kg"])},
+            {"stat": "Cells explored", "get": lambda: format(walking.game_numbers()["cells"], ",")},
+            {"stat": "Waypoints reached", "get": lambda: str(state["waypoints"])},
+            {"stat": "Contracts done / failed", "get": lambda: "%d / %d" % (state["contracts_done"],
+                                                                            state["contracts_failed"])},
+            {"stat": "Outposts found", "get": lambda: str(len(state["outposts"]))}]
 
 
-def start_items():
-    return [
-        {"button": "Continue", "do": lambda: start(True), "hint": "Carry on from the save."},
-        {"button": "New game", "do": lambda: start(False),
-         "hint": "Start again beside the ship; the next save replaces the old one."},
-        {"button": "Quit", "do": lambda: os._exit(0)},
-        {"note": save_note},
-    ]
+def system_screen():
+    status = slate.items_section("How it stands", status_items)
+    entries = [("Resume", "Esc", lambda: set_paused(False)),
+               ("Save", "F5", apps.saves_section("Save", ("Save now", lambda: saving.save_game()),
+                                                 "F5 saves at any time; F9 loads the last save.")),
+               ("Load", "F9", apps.saves_section("Load", ("Load", lambda: saving.load_game()),
+                                                 "Loading replaces the world you're in with the save's.")),
+               ("Settings", None, slate.items_section("Settings", settings_items())),
+               ("Controls", None, slate.items_section("Controls", ("controls", HELP_COLUMNS))),
+               "divider",
+               ("Quit to desktop", None, quit_game)]
+    return slate.SystemScreen(engine, "Paused · the world is stopped", "System", entries, note=apps.autosave_note,
+                              idle=status)
 
 
-def menu_tabs():
-    return [("System", system_items()), ("Car", economy.car_items()), ("Outpost", economy.outpost_items()),
-            ("Contracts", contracting.contract_items()), ("Upgrades", economy.upgrade_items()), ("Settings", settings_items()),
-            ("Controls", ("controls", HELP_COLUMNS))]
+def start_screen():
+    entries = [("Continue", "Enter", lambda: start(True)),
+               ("New game", None, lambda: start(False)),
+               ("Settings", None, slate.items_section("Settings", settings_items())),
+               "divider",
+               ("Quit", None, lambda: os._exit(0))]
 
-
-def menu_subtitle():
-    body = foot.bubble.body.name if foot.bubble is not None else planet.name
-    return "WALKER  //  %s  //  T+%s" % (body.upper(), clock_text(world.time))
-
-
-def clock_text(seconds):
-    s = int(seconds)
-    return "%02d:%02d:%02d" % (s // 3600, s // 60 % 60, s % 60)
+    def card(surface, left, top, width):
+        data = state["last_save"]
+        return apps.save_card(surface, left, top, width, data) if data is not None else 0.0
+    return slate.SystemScreen(engine, "A planet, a moon, a hover car", "Shoonyakasha", entries, card=card,
+                              sort_order=4)
 
 
 def start(continue_):
-    """From the start's menu: the save loaded, or a new game."""
-    menu = state["menu"]
+    """From the start's screen: the save loaded, or a new game."""
     state["starting"] = False
-    menu.title, menu.close_text = "Paused", "ESC  RESUME"
-    menu.set_tabs(menu_tabs())
-    menu.show(False)
+    state["start"].show(False)
     if continue_:
         saving.load_game()
 

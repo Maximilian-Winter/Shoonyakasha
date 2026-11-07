@@ -2,7 +2,7 @@
 The contracts in play (contracts.py): the outposts' offers for the day,
 accepting, pinning and abandoning them, delivering ore, couriers' crates
 and pods, the couriers' crates struck and broken, the survey contracts'
-shares measured, deadlines, rewards and reputations, and the Contracts tab.
+shares measured, deadlines, rewards and reputations, and the Contracts app's items.
 """
 
 import math
@@ -140,7 +140,7 @@ def poi_distance_to(direction, point):
 
 def contract_note(text, colour=GOOD_TOAST):
     state["contract_note"] = text
-    state["hud"].toast(text[0].upper() + text[1:], colour)
+    state["hud"].toast(text[0].upper() + text[1:], colour, kind="contracts")
 
 
 def accept_contract(c):
@@ -258,8 +258,9 @@ def deliver(outpost, item):
     if c.delivered >= c.quantity:
         complete_contract(c)
     else:
-        state["hud"].toast("Delivered %.0f kg of %s: %.0f / %.0f kg" % (item["mass"], resources.name(c.resource).lower(),
-                                                                     c.delivered, c.quantity), GOOD_TOAST)
+        state["hud"].toast("Delivered %.0f kg of %s: %.0f / %.0f kg"
+                           % (item["mass"], resources.name(c.resource).lower(), c.delivered, c.quantity), GOOD_TOAST,
+                           kind="contracts")
     return True
 
 
@@ -316,8 +317,7 @@ def update_contracts(dt):
     held back, contracts.Contract.paused) expired; the survey contracts'
     shares measured every SURVEY_EVERY (ExploredMap.share), completing at
     contracts.SURVEY_SHARE; the couriers' crates watched; with the car on
-    an open outpost's pad, the crates in its hold for there delivered; the Contracts tab
-    rebuilt when what it shows changes."""
+    an open outpost's pad, the crates in its hold for there delivered."""
     for o in state["outposts"]:
         o.reputation = state["reputation"].get(o.name, 0.0)
     if foot.player is None and not state["driving"]:
@@ -341,22 +341,6 @@ def update_contracts(dt):
             if c is not None and c.kind in ("courier", "recovery") and c.destination == outpost.name:
                 car.cargo.remove(item)
                 complete_contract(c)
-    refresh_contracts_tab()
-
-
-def refresh_contracts_tab():
-    """The Contracts tab's items built again when the outpost here, its offers, the active contracts or the pin changed."""
-    menu = state["menu"]
-    if state["starting"] or not menu.visible:
-        return
-    here = economy.at_outpost()
-    shown = (here.name if here is not None else None, tuple(c.id for c in contract_offers(here)),
-             tuple(c.id for c in state["contracts"]), state["pinned"])
-    if shown == state["contracts_shown"]:
-        return
-    state["contracts_shown"] = shown
-    k = menu.tab_named("Contracts")
-    menu.tabs[k] = ("Contracts", contract_items())
 
 
 def offer_line(c):
@@ -364,7 +348,7 @@ def offer_line(c):
 
 
 def contract_items():
-    """The Contracts tab: the offers of the outpost whose pad the car or
+    """The Contracts app's items: the offers of the outpost whose pad the car or
     the player is on, each with Accept; the active contracts, each with Pin;
     and Abandon for the pinned one."""
     here = economy.at_outpost()

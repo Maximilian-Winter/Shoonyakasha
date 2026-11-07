@@ -201,9 +201,9 @@ def markers(body):
 
 
 def hud_shown():
-    """On foot or in the car, with the full map and the menu hidden."""
+    """On foot or in the car, with the full map, the slate and the System screen hidden."""
     return ((foot.player is not None or state["driving"]) and not state["map_view"].open
-            and not state["menu"].visible)
+            and not state["slate"].visible and not state["system"].visible)
 
 
 def update_hud(dt):
@@ -346,7 +346,7 @@ def update_map(dt):
     cleared once reached, and the minimap and full map drawn on foot or in
     the car while the menu is hidden."""
     view, player = state["map_view"], foot.player
-    shown = (player is not None or state["driving"]) and not state["menu"].visible
+    shown = (player is not None or state["driving"]) and not state["system"].visible and not state["slate"].visible
     view.show(shown)
     if player is None and not state["driving"]:
         return
@@ -470,6 +470,8 @@ def update_game():
     delivered, the objectives moved on, the objective card shown (the
     pinned contract's in place of the objective)."""
     hud, player = state["hud"], foot.player
+    if state["market_record"] is None:
+        state["ledger"].watch(state["market"].credits)
     if player is None:
         return
     feet = foot.bubble.body_relative(player.feet())
@@ -487,10 +489,11 @@ def update_game():
         state["market"].credits += credits
         state["earned"] += credits
         state["sold_kg"] += item["mass"]
+        state["ledger"].sold(item["resource"], item["mass"])
         foot.props.remove(foot.bubble, prop, release=False)
         hud.toast("Sold %.0f kg of %s (grade %.2f) at %s: +%s cr"
                   % (item["mass"], resources.name(item["resource"]).lower(), item["grade"], outpost.name,
-                     format(int(round(credits)), ",")), GOOD_TOAST)
+                     format(int(round(credits)), ",")), GOOD_TOAST, kind="money")
     exploring.sell_pods(held)
     contracting.deliver_couriers(held)
     snapshot = game_numbers()

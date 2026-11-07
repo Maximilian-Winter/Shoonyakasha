@@ -1,7 +1,8 @@
 """
-The walker's interface style (walker.py, hud.py, explored_map.py,
-terminal.py): thin cyan lines on dark blue glass, panels with cut
-corners, corner brackets, faint scan lines, amber for warnings and money.
+The walker's full map's interface style (explored_map.py): thin cyan
+lines on dark blue glass, panels with cut corners, corner brackets, faint
+scan lines, amber for warnings and money. Its Layer, fonts and `measure`
+also serve the Field Slate style (fieldslate.py, hud.py, slate.py).
 
 Fonts: FONTS names the three faces, Rajdhani SemiBold for titles,
 Rajdhani Medium for text and Share Tech Mono for numbers, loaded once a
