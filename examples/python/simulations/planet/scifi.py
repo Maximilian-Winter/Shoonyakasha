@@ -5,7 +5,7 @@ corners, corner brackets, faint scan lines, amber for warnings and money.
 
 Fonts: FONTS names the three faces, Rajdhani SemiBold for titles,
 Rajdhani Medium for text and Share Tech Mono for numbers, loaded once a
-ui (`font`). `measure.width(text, size, face)` gives a text's width in
+ui (`font`); `add_faces` registers more. `measure.width(text, size, face)` gives a text's width in
 canvas units from the same files with Pillow, or an estimate without it;
 `wrap(text, size, width, face)` breaks a text between words into lines
 no wider than `width`.
@@ -54,6 +54,7 @@ GLOW_WIDTH = 4.0                 # canvas units the glow is wider than the line
 FONTS = {"title": "fonts/Rajdhani-SemiBold.ttf", "body": "fonts/Rajdhani-Medium.ttf",
          "mono": "fonts/ShareTechMono-Regular.ttf"}
 ESTIMATE = {"title": 0.5, "body": 0.47, "mono": 0.55}   # widths per size without Pillow
+MEASURE_SIZE = 100               # the size Pillow measures each face at, scaled from there
 
 CAP_SIZE = 13                    # the keys' text
 CAP_LABEL_SIZE = 16
@@ -78,26 +79,37 @@ class Measure:
         try:
             from PIL import ImageFont
             from shoonyakasha import assets
-            self.paths = {face: str(assets.locate(path)) for face, path in FONTS.items()}
+            self.locate = assets.locate
             self.image_font = ImageFont
         except Exception:
             self.image_font = None
 
     def width(self, text, size, face="body"):
+        """The width of `text` drawn `size` high: the ui scales a face so
+        that its ascent plus descent is the size."""
         if self.image_font is None:
             return ESTIMATE[face] * size * len(text)
-        key = (face, size)
-        font = self.fonts.get(key)
+        font = self.fonts.get(face)
         if font is None:
             try:
-                font = self.fonts[key] = self.image_font.truetype(self.paths[face], size)
+                font = self.image_font.truetype(str(self.locate(FONTS[face])), MEASURE_SIZE)
             except OSError:
                 return ESTIMATE[face] * size * len(text)
-        return font.getlength(text)
+            ascent, descent = font.getmetrics()
+            font = self.fonts[face] = (font, ascent + descent)
+        font, height = font
+        return font.getlength(text) * size / height
 
 
 measure = Measure()
 _loaded = {}
+
+
+def add_faces(faces, estimates):
+    """More faces for `font`, `measure` and Layer.text: `faces` maps a face's name to its file (under the
+    asset root), `estimates` to its width per size without Pillow."""
+    FONTS.update(faces)
+    ESTIMATE.update(estimates)
 
 
 def font(ui, face):
