@@ -214,6 +214,7 @@ Keys:
                                        then call for fuel in orbit
     python planet.py --cargo-check     put ore rocks in the cargo net, board and take off, check what was loaded
     python planet.py --trade-check     land on an outpost on the planet and on the moon, sell ore and buy fuel
+    python planet.py --erosion-check   measure the terrain with its gullies and without, and their cost
     python planet.py --upgrade-check   buy upgrades at Base, check the ship's and the gun's parameters through a save
     python planet.py --day-check       run one day at x16, check the sun, the exposure and the horizons' rebuilds
 """
@@ -390,6 +391,9 @@ parser.add_argument("--fuel-check", action="store_true",
                          "in orbit, and exit")
 parser.add_argument("--cargo-check", action="store_true",
                     help="put ore rocks in the cargo net, board and take off, check what was loaded, and exit")
+parser.add_argument("--erosion-check", action="store_true",
+                    help="measure the terrain with its gullies and without, print what they change and their cost, "
+                         "and exit")
 parser.add_argument("--trade-check", action="store_true",
                     help="land on an outpost on the planet and on the moon, sell ore and buy fuel, and exit")
 parser.add_argument("--day-check", action="store_true",
@@ -1818,8 +1822,9 @@ def load_game(path=None):
     day = data.get("day")
     if day is not None:
         state["day_cycle"], state["day_offset"] = day["cycle"], day["offset"]
-    if data["terrain"] != planet.terrain:
-        planet.terrain = {name: list(value) for name, value in data["terrain"].items()}
+    terrain = planet_world.complete_terrain(data["terrain"])
+    if terrain != planet.terrain:
+        planet.terrain = terrain
         world.regenerate()
         state["terrain_edit"].reset()
     state["regenerations"] = world.regenerations
@@ -2463,6 +2468,8 @@ def on_init():
         engine.ecs.add_system("PlanetCargoCheck", checks.CargoCheck(), priority=-2)
     elif args.trade_check:
         engine.ecs.add_system("PlanetTradeCheck", checks.TradeCheck(), priority=-2)
+    elif args.erosion_check:
+        engine.ecs.add_system("PlanetErosionCheck", checks.ErosionCheck(), priority=-2)
     elif args.upgrade_check:
         engine.ecs.add_system("PlanetUpgradeCheck", checks.UpgradeCheck(), priority=-2)
     elif args.day_check:

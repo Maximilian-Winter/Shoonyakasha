@@ -174,6 +174,7 @@ TERRAIN = {
     "hills": [40.0, 150.0, 1500.0, 6.0],    # frequency, height (m), ocean depth (m), octaves
     "seed": [0.0, 0.0, 0.0, 0.0],           # offset added to the noise input
     "detail": [80.0, 15.0, 4.0, 0.5],       # wavelength (m), height (m), octaves, erosion
+    "gullies": [50.0, 900.0, 4.0, 0.25],    # depth (m), wavelength (m), octaves, slope (m/m) at full depth
 }
 SITE_FACE = 4                    # +Z
 SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a vertex of every chunk from level 3 down
@@ -526,12 +527,23 @@ def horizon_tolerance(elevation):
 def terrain_floor(body):
     """Metres above `body`'s radius that no terrain goes below: its
     `floor`, or from its terrain parameters the seabed's depth, or on land
-    the continent's edge plus the hills' and the detail's heights, both
-    with 10 % to spare (terrain.glsl's noise stays within [-1, 1])."""
+    the continent's edge plus the hills', the gullies' (twice their depth,
+    more than their octaves add up to) and the detail's heights, both with 10 % to
+    spare (terrain.glsl's noise stays within [-1, 1])."""
     if body.floor is not None:
         return body.floor
     terrain = body.terrain
-    return -1.1 * max(terrain["hills"][2], 0.05 * terrain["continent"][3] + terrain["hills"][1] + terrain["detail"][1])
+    gullies = 2.0 * terrain.get("gullies", (0.0,))[0]
+    return -1.1 * max(terrain["hills"][2],
+                      0.05 * terrain["continent"][3] + terrain["hills"][1] + gullies + terrain["detail"][1])
+
+
+def complete_terrain(terrain):
+    """A copy of terrain parameters (a saved planet's) with each one it
+    lacks taken from TERRAIN."""
+    out = {name: list(value) for name, value in TERRAIN.items()}
+    out.update({name: list(value) for name, value in terrain.items()})
+    return out
 
 
 class PlanetWorld:

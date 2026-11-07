@@ -10,12 +10,14 @@ import json
 import math
 import os
 import random
+import time
 
 import numpy as np
 
 from shoonyakasha import keys
 from shoonyakasha.planet import cube_sphere
 from shoonyakasha.planet import gravity_gun as gun_module
+from shoonyakasha.planet import rivers
 from shoonyakasha.planet import wind as wind_field
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.character import Controls as FootControls
@@ -278,6 +280,12 @@ class CaptureTour:
          lambda: lift_camera(700.0), lambda: look_up(-20.0), clearings_ahead),
         ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
         ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
+        ("mountain_close_low_sun_no_gullies", 7, False, 0, ("gullies", 0, 0.0), DAY_SUN,
+         lambda: near_mountain(10.0, 135.0)),
+        ("gullies_from_above", 7, False, 0, None, DAY_SUN, lambda: near_mountain(12.0, 135.0),
+         lambda: lift_camera(4_500.0), lambda: look_up(-40.0)),
+        ("gullies_from_above_no_gullies", 7, False, 0, ("gullies", 0, 0.0), DAY_SUN,
+         lambda: near_mountain(12.0, 135.0), lambda: lift_camera(4_500.0), lambda: look_up(-40.0)),
         ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),
         ("mountain_top_no_detail", 7, False, 0, ("detail", 1, 0.0), DAY_SUN,
          lambda: near_mountain(15.0, 135.0, top=True)),
@@ -3172,6 +3180,112 @@ class CargoCheck:
         for k, line in enumerate(self.lines):
             print("[planet] %s%s" % ("cargo: " if k == 0 else "  ", line), flush=True)
         print("[planet]   %s" % ("passed" if ok else "FAILED"), flush=True)
+        os._exit(0 if ok else 1)
+
+
+class ErosionCheck:
+    """--erosion-check: the planet's terrain measured with its gullies and
+    without (their depth 0) on GRIDS height grids (shoonyakasha.planet.rivers
+    GridFrame, GRID by GRID points SPACING m apart) at seeded directions,
+    then the seconds the planet takes to build again (regenerate, until
+    settled) each way. Prints, over the points on land, the
+    mean, lowest and highest heights and the share steeper than STEEP
+    (from neighbouring points) each way, the gullies' root mean square and
+    largest change and the mean shift, and the build times; exits with
+    status 0 when the gullies change the ground by at least MIN_RMS m root
+    mean square, by less than twice their depth anywhere, and shift its
+    mean by less than MAX_SHIFT of their depth, 1 otherwise."""
+
+    GRIDS, GRID, SPACING = 10, 32, 25.0
+    STEEP = 0.5                          # rise over run
+    MIN_RMS = 1.0                        # m
+    MAX_SHIFT = 0.25
+
+    def __init__(self):
+        rng = random.Random(7)
+        self.centres = [normalize((rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1))) for _ in range(self.GRIDS)]
+        self.heights = {True: [], False: []}
+        self.builds = {}                 # gullies on: seconds to build the planet
+        self.building = None             # (gullies on, when it started)
+        self.depth = planet.terrain["gullies"][0]
+        self.on, self.k, self.asked = True, 0, False
+
+    def set_gullies(self, on):
+        planet.terrain["gullies"][0] = self.depth if on else 0.0
+        world.upload_terrain()
+
+    def __call__(self, dt):
+        if self.building is None and (planet.tree is None or state["survey"] is not None):
+            return True
+        if self.k < self.GRIDS:
+            self.measure()
+        else:
+            self.build()
+        return True
+
+    def measure(self):
+        if not self.asked:
+            self.set_gullies(self.on)
+            world.request_height_grid(rivers.GridFrame(self.centres[self.k], RADIUS, self.GRID, self.SPACING))
+            self.asked = True
+            return
+        grid = world.height_grid()
+        if grid is None:
+            return
+        self.heights[self.on].append(grid)
+        self.asked = False
+        if self.on:
+            self.on = False
+        else:
+            self.on, self.k = True, self.k + 1
+
+    def build(self):
+        if self.building is None:
+            on = True not in self.builds
+            self.set_gullies(on)
+            world.regenerate()
+            self.building = (on, time.perf_counter())
+            return
+        on, started = self.building
+        if planet.tree is None or state["survey"] is not None or not settled():
+            return
+        self.builds[on] = time.perf_counter() - started
+        self.building = None
+        if len(self.builds) == 2:
+            self.report()
+
+    def report(self):
+        self.set_gullies(True)
+
+        def stats(grids):
+            land = [g[g > 0.0] for g in grids]
+            steep = []
+            for g in grids:
+                dy, dx = np.gradient(g, self.SPACING)
+                steep.append((np.hypot(dx, dy) > self.STEEP)[g > 0.0])
+            values = np.concatenate(land)
+            return values, np.concatenate(steep)
+
+        on, steep_on = stats(self.heights[True])
+        mask = np.concatenate([(g > 0.0).ravel() for g in self.heights[False]])
+        all_on = np.concatenate([g.ravel() for g in self.heights[True]])
+        all_off = np.concatenate([g.ravel() for g in self.heights[False]])
+        off, steep_off = stats(self.heights[False])
+        change = (all_on - all_off)[mask]
+        rms = float(np.sqrt(np.mean(change ** 2))) if change.size else 0.0
+        largest = float(np.abs(change).max()) if change.size else 0.0
+        shift = float(change.mean()) if change.size else 0.0
+        for name, values, steep in (("with gullies", on, steep_on), ("without", off, steep_off)):
+            print("[planet] %s: %d points on land, mean %.1f m, from %.1f to %.1f m, %.1f %% steeper than %.1f"
+                  % (name, values.size, values.mean(), values.min(), values.max(), 100.0 * steep.mean(), self.STEEP),
+                  flush=True)
+        print("[planet] the gullies (%.0f m deep, %.0f m wavelength, %d octaves) change the ground by %.1f m rms, "
+              "%.1f m at most, its mean by %+.2f m; the planet built in %.1f s with them, %.1f s without"
+              % (self.depth, planet.terrain["gullies"][1], int(planet.terrain["gullies"][2]), rms, largest, shift,
+                 self.builds[True], self.builds[False]), flush=True)
+        ok = (change.size > 0 and rms >= self.MIN_RMS and largest < 2.0 * self.depth
+              and abs(shift) < self.MAX_SHIFT * self.depth)
+        print("[planet] erosion check %s" % ("passed" if ok else "FAILED"), flush=True)
         os._exit(0 if ok else 1)
 
 

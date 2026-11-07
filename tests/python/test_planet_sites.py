@@ -25,7 +25,7 @@ KERNEL = """#version 450
 layout(local_size_x = 64) in;
 layout(std140, set = 0, binding = 0) uniform TerrainParams {
     vec4 continent; vec4 mountains; vec4 hills; vec4 seed; vec4 site; vec4 siteShape; vec4 detail;
-    vec4 climate; vec4 biomeView; vec4 sites[8]; vec4 siteShapes[8];
+    vec4 climate; vec4 biomeView; vec4 gullies; vec4 sites[8]; vec4 siteShapes[8];
 } terrain;
 layout(std430, set = 0, binding = 1) readonly buffer Inputs { vec4 items[]; } src;
 layout(std430, set = 0, binding = 2) writeonly buffer Outputs { vec4 values[]; } dst;
@@ -94,7 +94,7 @@ class SitesShader(unittest.TestCase):
         shapes = ([PLANET_SHAPE + (0.0, world.RADIUS), MOON_SHAPE + (1.0, world.MOON_RADIUS)]
                   + [(0.0, 0.0, 0.0, 0.0)] * 6)
         params = (list(t["continent"]) + list(t["mountains"]) + list(t["hills"]) + [0.0] * 4 + [0.0] * 4
-                  + [150.0, 600.0, world.RADIUS, 0.0] + list(t["detail"]) + [0.0] * 8
+                  + [150.0, 600.0, world.RADIUS, 0.0] + list(t["detail"]) + [0.0] * 12
                   + [c for s in sites for c in s] + [c for s in shapes for c in s])
         uniform = self.ctx.upload(struct.pack("<%df" % len(params), *params))
         items = np.array([tuple(d) + (float(body),) for d, body in points], dtype=np.float32)

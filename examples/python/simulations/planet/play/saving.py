@@ -15,6 +15,7 @@ map's grids go beside it (save.write).
 """
 
 from shoonyakasha.planet.vec import add, normalize, scale
+from shoonyakasha.planet.world import complete_terrain
 
 import save
 from explored_map import Grid
@@ -109,7 +110,7 @@ def load_game(base=None):
         state.ui.hud.toast(str(error).capitalize(), hud_module.WARNING)
         print("[walker] %s" % error, flush=True)
         return False
-    if data["world"]["terrain"] != planet.terrain:
+    if complete_terrain(data["world"]["terrain"]) != planet.terrain:
         state.ui.hud.toast("The save is of another planet", hud_module.WARNING)
         return False
     by_name = {body.name: body for body in bodies}

@@ -103,6 +103,8 @@
           "default": [ 0.0, 0.0, 0.0, 0.0 ] },
         { "name": "biomeView", "type": "vec4", "source": "scene.custom.planet.terrain.biomeView",
           "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "gullies", "type": "vec4", "source": "scene.custom.planet.terrain.gullies",
+          "default": [ 0.0, 900.0, 4.0, 0.25 ] },
         { "name": "sites", "type": "vec4", "arrayCount": 8, "source": "scene.custom.planet.terrain.sites[i]" },
         { "name": "siteShapes", "type": "vec4", "arrayCount": 8,
           "source": "scene.custom.planet.terrain.siteShapes[i]" },
