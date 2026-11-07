@@ -204,6 +204,8 @@ bool rockTaken(int body, int face, int grid, ivec2 cell) {
 // biomes (desert, steppe, tundra) and rock (groundCover's steep or high
 // rock), fewer on snow, none on beaches; boulders on the rock, a few on dry
 // biomes. On the moon: by the slope, so crater walls and rims hold the most.
+const float SCREE_ROCKS = 0.6;   // the small rocks' chance added on full scree
+
 void rockChances(int body, vec3 radial, float height, vec3 normal, vec3 climate, out float small,
                  out float boulder) {
     float slope = 1.0 - dot(normal, radial);
@@ -218,12 +220,12 @@ void rockChances(int body, vec3 radial, float height, vec3 normal, vec3 climate,
     if (height < 0.0) return;
     vec3 c = climateWithSettings(climate);
     float rock, snow, beach;
-    groundCover(height, slope, c.x, rock, snow, beach);
+    groundCover(radial, normal, height, c.x, rock, snow, beach);
     float biomes[BIOMES];
     biomeWeights(c.x, c.y, biomes);
     float dry = biomes[BIOME_DESERT] + biomes[BIOME_STEPPE] + biomes[BIOME_TUNDRA];
     float open = 1.0 - beach;
-    small = (0.03 + 0.3 * dry + 0.5 * rock) * open * (1.0 - 0.7 * snow);
+    small = (0.03 + 0.3 * dry + 0.5 * rock + SCREE_ROCKS * screeOfClimate(c)) * open * (1.0 - 0.7 * snow);
     boulder = (0.015 * dry + 0.25 * rock) * open;
 }
 
@@ -289,7 +291,7 @@ vec3 scanFamilies(vec3 radial, float height, vec3 normal, vec3 climate) {
     float slope = 1.0 - dot(normal, radial);
     vec3 c = climateWithSettings(climate);
     float rock, snow, beach;
-    groundCover(height, slope, c.x, rock, snow, beach);
+    groundCover(radial, normal, height, c.x, rock, snow, beach);
     float biomes[BIOMES];
     biomeWeights(c.x, c.y, biomes);
     float dry = biomes[BIOME_DESERT] + biomes[BIOME_STEPPE];
