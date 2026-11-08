@@ -28,7 +28,7 @@ KERNEL = """#version 450
 layout(local_size_x = 64) in;
 layout(std140, set = 0, binding = 0) uniform TerrainParams {
     vec4 continent; vec4 mountains; vec4 hills; vec4 seed; vec4 site; vec4 siteShape; vec4 detail;
-    vec4 climate; vec4 biomeView;
+    vec4 climate; vec4 biomeView; vec4 gullies;
 } terrain;
 layout(std430, set = 0, binding = 1) readonly buffer Inputs { vec4 items[]; } src;   // three per item
 layout(std430, set = 0, binding = 2) writeonly buffer Outputs { float values[]; } dst;  // OUT per item
@@ -131,9 +131,9 @@ class BiomeShader(unittest.TestCase):
     def run_items(self, mode, items, climate=(0.0, 0.0, 0.0, 0.0)):
         """The kernel's outputs (OUT per item) for items of three vec4 each."""
         items = np.ascontiguousarray(items, dtype=np.float32).reshape(-1, 12)
-        params = [0.0] * 4 * 7 + list(climate) + [0.0] * 4    # the seed at 0
+        params = [0.0] * 4 * 7 + list(climate) + [0.0] * 8    # the seed at 0
         params[4 * 5 + 2] = world.RADIUS                         # siteShape.z
-        uniform = self.ctx.upload(struct.pack("<36f", *params))
+        uniform = self.ctx.upload(struct.pack("<40f", *params))
         out = np.zeros(len(items) * OUT, dtype=np.float32)
         self.ctx.run(self.kernel, [uniform, items, out], threads=len(items),
                      push=struct.pack("<II", len(items), mode))

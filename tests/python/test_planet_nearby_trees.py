@@ -129,6 +129,20 @@ class NearbyTreesTest(unittest.TestCase):
         engine.readback = readback(1, [])
         self.assertIsNone(nearby.read())
 
+    def test_scanned_rocks_read_on_their_grids(self):
+        engine = FakeEngine()
+        nearby = NearbyTrees(engine)
+        nearby.request((0.0, 0.0, 0.0), 40.0)
+        engine.readback = readback(1, [((0.0, 0.0, 0.0), 2.0, 0.5, vegetation.KINDS.index("nq_boulder_03"), 1, 3, 4, 0, 0.0),
+                                       ((1.0, 0.0, 0.0), 0.3, 0.5, vegetation.KINDS.index("nq_stones_b"), 1, 5, 6, 0, 0.0),
+                                       ((2.0, 0.0, 0.0), 0.5, 0.5, vegetation.KINDS.index("fern_b"), 1, 7, 8, 0, 0.0)])
+        large, small, fern = nearby.read()
+        self.assertEqual(large.key, (0, 2, 1, 3, 4))
+        self.assertEqual(small.key, (0, 3, 1, 5, 6))
+        self.assertTrue(large.rock and small.rock)
+        self.assertFalse(fern.rock)
+        self.assertEqual(fern.key, (0, 0, 1, 7, 8))
+
     def test_count_capped(self):
         engine = FakeEngine()
         nearby = NearbyTrees(engine)

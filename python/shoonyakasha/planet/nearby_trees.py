@@ -19,7 +19,7 @@ factor (as vegetation.glsl's vegetationWidth, from its tint), its turn
 about its up (cosine, sine), its tint, an ore rock's grade (its ore
 richness, from bits 8 to 15 of the kind's word, over 255; 0 for every
 other) and its resource (resources.py's ids, from the bits from 16 up; 0
-for every other). `rock` tells a rock. `trunk`
+for every other). `rock` tells a rock (rocks.is_rock: a scanned rock too). `trunk`
 gives a plant's trunk as a column: (radius, height) in metres, from
 TRUNKS, the share of the plant's height each mesh's trunk has
 (vegetation.py) near its foot and up to where it thins or forks.
@@ -33,10 +33,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import vegetation
-from .rocks import ROCK_KINDS, rock_grid
+from .rocks import is_rock, rock_grid
 
 CAPACITY = 1024                  # plants NearbyTrees holds (vegetation.nearby.z)
-ROCK_INDEX = vegetation.KINDS.index("rock")   # the small rocks' kind, on grid 1
+GRIDS = np.array([rock_grid(k) if is_rock(k) else 0 for k in vegetation.KINDS], np.int64)   # each kind's grid
 HEADER = 4                       # words before the first plant: count, stamp, 2 unused
 WORDS = 12                       # words per plant
 
@@ -75,7 +75,7 @@ class NearbyTree:
 
     @property
     def rock(self):
-        return self.kind in ROCK_KINDS
+        return is_rock(self.kind)
 
     @property
     def trunk(self):
@@ -88,7 +88,7 @@ class NearbyTree:
 def key_of(row):
     """The key of a listed row of WORDS words."""
     kind = vegetation.KINDS[int(row[5]) & 0xFF]
-    return (int(row[9]), rock_grid(kind) if kind in ROCK_KINDS else 0, int(row[6]),
+    return (int(row[9]), rock_grid(kind) if is_rock(kind) else 0, int(row[6]),
             int(row[7].view(np.int32)), int(row[8].view(np.int32)))
 
 
@@ -141,7 +141,7 @@ class NearbyTrees:
         kinds = (rows[:, 5] & 0xFF).astype(np.int64)
         grades = ((rows[:, 5] >> 8) & 0xFF).astype(np.float64) / 255.0
         resources = (rows[:, 5] >> 16).astype(np.int64)
-        grid = (kinds == ROCK_INDEX).astype(np.int64)
+        grid = GRIDS[kinds]
         t = floats[:, 4] * np.float32(7.31)
         width = 0.85 + 0.3 * (t - np.floor(t)).astype(np.float64)
         keys = np.stack([body, grid, rows[:, 6].astype(np.int64), cells[:, 7], cells[:, 8]], axis=1).tolist()

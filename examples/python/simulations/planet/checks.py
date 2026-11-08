@@ -10,12 +10,14 @@ import json
 import math
 import os
 import random
+import time
 
 import numpy as np
 
 from shoonyakasha import keys
 from shoonyakasha.planet import cube_sphere
 from shoonyakasha.planet import gravity_gun as gun_module
+from shoonyakasha.planet import rivers
 from shoonyakasha.planet import wind as wind_field
 from shoonyakasha.planet import world as planet_world
 from shoonyakasha.planet.character import Controls as FootControls
@@ -39,7 +41,7 @@ from __main__ import (
     CAPTURES, CRATE_DENSITY, CRATE_SIZE, DAY_SUN, FLIGHT_STEP, NET_HALF, ORBIT_HEIGHT, PIXEL_ANGLE,
     SET_DOWN_DEPTH, SHIP_CLEARANCE, SHIP_REACH, WARPS, bodies, change_terrain, contact_text, credits_text,
     distance_text, drop_bubble, engine, ensure_bubble, foot, get_in, get_out, go_on_foot, in_net_now, load_game,
-    moon_body, moon_spot, nearby_trees, net_frame, new_seed, new_ship, on_key, outpost_here, physics, planet,
+    moon_body, moon_spot, nearby_trees, net_frame, new_seed, new_ship, on_key, outpost_here, pads, physics, planet,
     SHIP_UPGRADES, prop_state, props, save_game, scanner, scatter_rocks, set_colour_mode, set_hour, set_wireframe,
     ship_landed,
     ship_velocity, ship_wind, state, teleport, trunks, viewpoint, world)
@@ -190,6 +192,44 @@ def near_mountain(sun_elevation, sun_azimuth, top=False):
     world.upload_sky()
 
 
+SCAN_SUN = (35.0, 0.0)          # the scans' shots: the sun 35 degrees up in the east, behind the camera looking west
+
+
+def at_outpost(purpose, distance, azimuth, height, down, sun_elevation):
+    """The free camera `height` metres above the outpost of `purpose` (the
+    first such; else, or with None, the first outpost: one on the planet when there is one), `distance` metres from its pad's
+    centre at `azimuth` degrees from east towards north, looking back at it
+    and `down` degrees below level; the sun `sun_elevation` degrees up there,
+    behind the camera."""
+    found = [o for o in state["outposts"][1:] if o.purpose == purpose] or state["outposts"][1:]
+    o = found[0]
+    up = o.direction
+    east, north = local_frame(up)
+    a = math.radians(azimuth)
+    level = add(scale(east, math.cos(a)), scale(north, math.sin(a)))
+    state["mode"] = "camera"
+    state["position"] = add(o.point(), add(scale(level, distance), scale(up, height)))
+    tilt = math.radians(down)
+    state["forward"] = normalize(add(scale(level, -math.cos(tilt)), scale(up, -math.sin(tilt))))
+    e = math.radians(sun_elevation)
+    sun = add(scale(up, math.sin(e)), scale(level, math.cos(e)))
+    _, site_up, site_east, site_north = world.site_frame()
+    world.sun_elevation = math.degrees(math.asin(max(-1.0, min(1.0, dot(sun, site_up)))))
+    world.sun_azimuth = math.degrees(math.atan2(dot(sun, site_north), dot(sun, site_east)))
+    world.upload_sky()
+
+
+OUTPOST_SHOTS = [("outpost_%s_%s" % (purpose, when), 1, False, 0, None, DAY_SUN,
+                  lambda purpose=purpose, sun=sun: at_outpost(purpose, 95.0, 30.0, 28.0, 14.0, sun))
+                 for purpose in ("mining", "fuel", "research", "trade") for when, sun in (("day", 35.0), ("dusk", 1.0))] + [
+    ("outpost_on_foot", 1, False, 0, None, DAY_SUN, lambda: at_outpost("mining", 26.0, 200.0, 1.7, 3.0, 25.0)),
+    ("outpost_beacon_night", 1, False, 0, None, DAY_SUN, lambda: setattr(pads, "steady", True),
+     lambda: at_outpost(None, 3_000.0, 60.0, 1_200.0, 20.0, -25.0)),
+    ("outpost_beacon_from_orbit", 1, False, 0, None, DAY_SUN, lambda: setattr(pads, "steady", True),
+     lambda: at_outpost(None, 40_000.0, 60.0, 60_000.0, 50.0, -30.0)),
+]
+
+
 class CaptureTour:
     """--capture: each shot in turn, a screenshot once settled (or after
     MAX_FRAMES), then exit. Waits for the site's height first."""
@@ -228,6 +268,11 @@ class CaptureTour:
         ("vegetation_conifers", 1, False, 0, None, DAY_SUN, lambda: over_ground(6_000.0, 270.0, 1_800.0, 12.0)),
         ("vegetation_mixed_wood", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 260.0, 10.0)),
         ("grass_meadow", 1, False, 0, None, DAY_SUN, lambda: over_ground(3_000.0, 180.0, 2.5, 6.0)),
+        ("scans_forest_floor", 1, False, 0, None, SCAN_SUN, lambda: over_ground(8_000.0, 180.0, 1.6, 18.0)),
+        ("scans_desert", 1, False, 0, None, SCAN_SUN, lambda: setattr(world, "moisture_offset", -0.8),
+         lambda: over_ground(3_000.0, 180.0, 1.6, 10.0)),
+        ("scans_desert_down", 1, False, 0, None, SCAN_SUN, lambda: setattr(world, "moisture_offset", -0.8),
+         lambda: over_ground(3_050.0, 180.0, 1.6, 35.0)),
         ("grass_wood_edge", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 3.0, 4.0)),
         ("vegetation_wood_low", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 0.0, 0.0),
          lambda: lift_camera(700.0), lambda: look_up(-20.0)),
@@ -235,6 +280,15 @@ class CaptureTour:
          lambda: lift_camera(700.0), lambda: look_up(-20.0), clearings_ahead),
         ("mountain_close", 7, False, 0, None, DAY_SUN, lambda: near_mountain(40.0, 160.0)),
         ("mountain_close_low_sun", 7, False, 0, None, DAY_SUN, lambda: near_mountain(10.0, 135.0)),
+        ("mountain_close_low_sun_no_gullies", 7, False, 0, ("gullies", 0, 0.0), DAY_SUN,
+         lambda: near_mountain(10.0, 135.0)),
+        ("geology_strata_and_scree", 7, False, 0, None, DAY_SUN, lambda: near_mountain(30.0, 200.0)),
+        ("geology_snow_by_aspect", 7, False, 0, None, DAY_SUN, lambda: near_mountain(25.0, 160.0, top=True),
+         lambda: setattr(world, "temperature_offset", -9.0)),
+        ("gullies_from_above", 7, False, 0, None, DAY_SUN, lambda: near_mountain(12.0, 135.0),
+         lambda: lift_camera(4_500.0), lambda: look_up(-40.0)),
+        ("gullies_from_above_no_gullies", 7, False, 0, ("gullies", 0, 0.0), DAY_SUN,
+         lambda: near_mountain(12.0, 135.0), lambda: lift_camera(4_500.0), lambda: look_up(-40.0)),
         ("mountain_top", 7, False, 0, None, DAY_SUN, lambda: near_mountain(15.0, 135.0, top=True)),
         ("mountain_top_no_detail", 7, False, 0, ("detail", 1, 0.0), DAY_SUN,
          lambda: near_mountain(15.0, 135.0, top=True)),
@@ -258,7 +312,7 @@ class CaptureTour:
         ("chase_in_orbit", 9, False, 0, None, DAY_SUN, lambda: state.update(chase=True)),
         ("chase_on_the_moon", 1, False, 0, None, DAY_SUN, lambda: teleport(8, moon=True),
          lambda: state.update(chase=True)),
-    ]
+    ] + OUTPOST_SHOTS
 
     def __init__(self, directory, names=None):
         """`names`: only the shots whose names contain one of these."""
@@ -274,6 +328,8 @@ class CaptureTour:
         if world.site_height is None:
             return True
         name, preset, wireframe, colour_mode, change, sun, *setup = self.SHOTS[self.shot]
+        if name.startswith("outpost_") and len(state["outposts"]) < 2:
+            return True
         self.frames += 1
         if self.frames == 1:
             if change is not None:
@@ -293,6 +349,8 @@ class CaptureTour:
             state["help"].show(False)
             state["input"] = "keys"
             world.set_clearings([])
+            world.moisture_offset = world.temperature_offset = 0.0
+            pads.steady = False
             for action in setup:
                 action()
         elif self.captured is None:
@@ -3125,6 +3183,112 @@ class CargoCheck:
         for k, line in enumerate(self.lines):
             print("[planet] %s%s" % ("cargo: " if k == 0 else "  ", line), flush=True)
         print("[planet]   %s" % ("passed" if ok else "FAILED"), flush=True)
+        os._exit(0 if ok else 1)
+
+
+class ErosionCheck:
+    """--erosion-check: the planet's terrain measured with its gullies and
+    without (their depth 0) on GRIDS height grids (shoonyakasha.planet.rivers
+    GridFrame, GRID by GRID points SPACING m apart) at seeded directions,
+    then the seconds the planet takes to build again (regenerate, until
+    settled) each way. Prints, over the points on land, the
+    mean, lowest and highest heights and the share steeper than STEEP
+    (from neighbouring points) each way, the gullies' root mean square and
+    largest change and the mean shift, and the build times; exits with
+    status 0 when the gullies change the ground by at least MIN_RMS m root
+    mean square, by less than twice their depth anywhere, and shift its
+    mean by less than MAX_SHIFT of their depth, 1 otherwise."""
+
+    GRIDS, GRID, SPACING = 10, 32, 25.0
+    STEEP = 0.5                          # rise over run
+    MIN_RMS = 1.0                        # m
+    MAX_SHIFT = 0.25
+
+    def __init__(self):
+        rng = random.Random(7)
+        self.centres = [normalize((rng.gauss(0, 1), rng.gauss(0, 1), rng.gauss(0, 1))) for _ in range(self.GRIDS)]
+        self.heights = {True: [], False: []}
+        self.builds = {}                 # gullies on: seconds to build the planet
+        self.building = None             # (gullies on, when it started)
+        self.depth = planet.terrain["gullies"][0]
+        self.on, self.k, self.asked = True, 0, False
+
+    def set_gullies(self, on):
+        planet.terrain["gullies"][0] = self.depth if on else 0.0
+        world.upload_terrain()
+
+    def __call__(self, dt):
+        if self.building is None and (planet.tree is None or state["survey"] is not None):
+            return True
+        if self.k < self.GRIDS:
+            self.measure()
+        else:
+            self.build()
+        return True
+
+    def measure(self):
+        if not self.asked:
+            self.set_gullies(self.on)
+            world.request_height_grid(rivers.GridFrame(self.centres[self.k], RADIUS, self.GRID, self.SPACING))
+            self.asked = True
+            return
+        grid = world.height_grid()
+        if grid is None:
+            return
+        self.heights[self.on].append(grid)
+        self.asked = False
+        if self.on:
+            self.on = False
+        else:
+            self.on, self.k = True, self.k + 1
+
+    def build(self):
+        if self.building is None:
+            on = True not in self.builds
+            self.set_gullies(on)
+            world.regenerate()
+            self.building = (on, time.perf_counter())
+            return
+        on, started = self.building
+        if planet.tree is None or state["survey"] is not None or not settled():
+            return
+        self.builds[on] = time.perf_counter() - started
+        self.building = None
+        if len(self.builds) == 2:
+            self.report()
+
+    def report(self):
+        self.set_gullies(True)
+
+        def stats(grids):
+            land = [g[g > 0.0] for g in grids]
+            steep = []
+            for g in grids:
+                dy, dx = np.gradient(g, self.SPACING)
+                steep.append((np.hypot(dx, dy) > self.STEEP)[g > 0.0])
+            values = np.concatenate(land)
+            return values, np.concatenate(steep)
+
+        on, steep_on = stats(self.heights[True])
+        mask = np.concatenate([(g > 0.0).ravel() for g in self.heights[False]])
+        all_on = np.concatenate([g.ravel() for g in self.heights[True]])
+        all_off = np.concatenate([g.ravel() for g in self.heights[False]])
+        off, steep_off = stats(self.heights[False])
+        change = (all_on - all_off)[mask]
+        rms = float(np.sqrt(np.mean(change ** 2))) if change.size else 0.0
+        largest = float(np.abs(change).max()) if change.size else 0.0
+        shift = float(change.mean()) if change.size else 0.0
+        for name, values, steep in (("with gullies", on, steep_on), ("without", off, steep_off)):
+            print("[planet] %s: %d points on land, mean %.1f m, from %.1f to %.1f m, %.1f %% steeper than %.1f"
+                  % (name, values.size, values.mean(), values.min(), values.max(), 100.0 * steep.mean(), self.STEEP),
+                  flush=True)
+        print("[planet] the gullies (%.0f m deep, %.0f m wavelength, %d octaves) change the ground by %.1f m rms, "
+              "%.1f m at most, its mean by %+.2f m; the planet built in %.1f s with them, %.1f s without"
+              % (self.depth, planet.terrain["gullies"][1], int(planet.terrain["gullies"][2]), rms, largest, shift,
+                 self.builds[True], self.builds[False]), flush=True)
+        ok = (change.size > 0 and rms >= self.MIN_RMS and largest < 2.0 * self.depth
+              and abs(shift) < self.MAX_SHIFT * self.depth)
+        print("[planet] erosion check %s" % ("passed" if ok else "FAILED"), flush=True)
         os._exit(0 if ok else 1)
 
 

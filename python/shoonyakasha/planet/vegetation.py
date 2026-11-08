@@ -22,19 +22,27 @@ the kinds vegetation_scatter.comp and grass_scatter.comp place:
                               a convex hull, rock_triangles(name) its
                               triangles for a mesh of its own
     grass                     three crossed cards of a tuft
+    then each kind of scans.SCANS, a prepared scan (scan_mesh)
 
 A vertex is three vec4: position (xyz) and the texture's u; the normal
 (xyz) and the part (w: PART_BARK, PART_CARD, PART_GRASS, PART_IMPOSTOR,
-PART_PLAIN); and a shade (rgb: 1 in the open, darker deep in a crown or
-low down) and the texture's v. Bark's (u, v) are in tiles of the bark
+PART_PLAIN, or a scan's part); and a shade (rgb: 1 in the open, darker
+deep in a crown or low down; a scan's tangent instead) and the texture's
+v. A scan's part is PART_SCAN + 4 x its material's atlas cell + 2 when the
+material is cut out by its alpha + 1 when its bitangent is the tangent's
+cross the normal turned round (scan_part); its (u, v) are its material's
+own, which the shaders map into its cell. Bark's (u, v) are in tiles of the bark
 texture around and up the trunk (in its height's units); cards' and
 impostors' are in their atlas. A card's normal points out from its crown's
 centre, leaning towards the card's own, so a crown is lit as a whole.
 
-`meshes(impostor_rects=None)` gives every kind's vertices in one array,
-the indices in one array (into the whole vertex array) and each kind's
-(first index, index count); `impostor_rects` maps a tree's name to its
-impostor's (u0, v0, u1, v1) (the whole image without it). `trees()` gives
+`meshes(impostor_rects=None, scan_cells=None)` gives every kind's
+vertices in one array, the indices in one array (into the whole vertex
+array) and each kind's (first index, index count); `impostor_rects` maps
+a tree's name to its impostor's (u0, v0, u1, v1) (the whole image without
+it), `scan_cells` maps (scan kind, material) to its atlas cell
+(scans.atlas); a scan not prepared, or without `scan_cells`, has no
+triangles. `trees()` gives
 each tree's near mesh by name, for baking impostors.
 `draw_template(ranges, firsts)` gives the kinds' indexed indirect draws
 with no instances.
@@ -44,17 +52,18 @@ import math
 
 import numpy as np
 
-from . import vegetation_textures
+from . import scans, vegetation_textures
 
 TREES = ("conifer_a", "conifer_b", "broadleaf_a", "broadleaf_b", "acacia")
 KINDS = tuple(k for tree in TREES for k in (tree, tree + "_far")) + ("bush", "shrub", "cactus", "rock", "boulder",
-                                                                      "grass")
+                                                                      "grass") + scans.NAMES
 GRASS = KINDS.index("grass")
+SCAN_FIRST = GRASS + 1
 # name: (seed, height over width before scaling, the icosphere's subdivisions)
 ROCKS = {"rock": (21, 0.55, 1), "boulder": (22, 0.7, 2)}
 ROCK_SINK = 0.25             # units a rock reaches below its base
 
-PART_BARK, PART_CARD, PART_GRASS, PART_IMPOSTOR, PART_PLAIN = range(5)
+PART_BARK, PART_CARD, PART_GRASS, PART_IMPOSTOR, PART_PLAIN, PART_SCAN = range(6)
 CROWN_NORMAL = 0.75          # of a card's normal: the share pointing out from the crown's centre
 GRASS_UP = 0.65              # of a grass card's normal: the share that is straight up
 
@@ -331,6 +340,30 @@ def rock_triangles(name):
     return v[:, 0:3], v[:, 4:7], v[:, 8:11]
 
 
+def scan_part(cell, cutout, flipped):
+    return PART_SCAN + 4 * cell + (2 if cutout else 0) + (1 if flipped else 0)
+
+
+def scan_mesh(scan, cells):
+    """A prepared scan's (vertices N x 12, indices), one unit tall above
+    its base less its kind's sink, which reaches below it; triangles of a
+    material without a cell are left out."""
+    if scan is None or cells is None:
+        return np.zeros((0, 12), np.float32), np.zeros(0, np.uint32)
+    height = scan.height
+    p = scan.positions / height
+    p[:, 1] -= scan.kind.sink
+    cell = np.array([cells.get((scan.kind.name, int(m)), -1) for m in range(int(scan.materials.max()) + 1)])
+    cutout = np.array([bool(t.get("cutout")) for t in scan.textures] + [False] * len(cell))
+    material = scan.materials.astype(np.int64)
+    part = PART_SCAN + 4 * cell[material] + 2 * cutout[material] + (scan.tangents[:, 3] < 0.0)
+    vertices = np.concatenate([p, scan.uvs[:, :1], scan.normals, part[:, None], scan.tangents[:, :3],
+                               scan.uvs[:, 1:2]], axis=1).astype(np.float32)
+    triangles = scan.indices.reshape(-1, 3)
+    kept = (cell[material[triangles]] >= 0).all(axis=1)
+    return vertices, triangles[kept].reshape(-1).astype(np.uint32)
+
+
 def _grass():
     b = _Builder()
     rect = vegetation_textures.card_rect("grass")
@@ -359,12 +392,20 @@ def trees():
     return {name: _tree(name).arrays() for name in TREES}
 
 
-def meshes(impostor_rects=None):
+def meshes(impostor_rects=None, scan_cells=None):
     """(vertices (N x 12 float32), indices (uint32, into the whole vertex
     array), [(first index, index count)] per kind)."""
     parts, ranges, first_vertex, first_index = [], [], 0, 0
     all_indices = []
     for name in KINDS:
+        if name in scans.NAMES:
+            vertices, indices = scan_mesh(scans.prepared(name) if scan_cells is not None else None, scan_cells)
+            parts.append(vertices)
+            all_indices.append(indices + first_vertex)
+            ranges.append((first_index, len(indices)))
+            first_vertex += len(vertices)
+            first_index += len(indices)
+            continue
         if name.endswith("_far"):
             tree = name[:-4]
             rect = (impostor_rects or {}).get(tree, (0.0, 0.0, 1.0, 1.0))
@@ -382,6 +423,17 @@ def meshes(impostor_rects=None):
         first_vertex += len(vertices)
         first_index += len(indices)
     return np.concatenate(parts), np.concatenate(all_indices).astype(np.uint32), ranges
+
+
+def instance_firsts(capacity, grass_capacity):
+    """Each kind's first instance in VegetationInstances: `capacity` a
+    kind, grass's `grass_capacity` after its own first, the scans after
+    grass's."""
+    firsts = []
+    for kind in range(len(KINDS)):
+        firsts.append(kind * capacity if kind <= GRASS else GRASS * capacity + grass_capacity
+                      + (kind - SCAN_FIRST) * capacity)
+    return firsts
 
 
 def draw_template(ranges, firsts):

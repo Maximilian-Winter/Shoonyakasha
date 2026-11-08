@@ -5,7 +5,9 @@ runs, jumps and jets with the gravity gun in hand
 (shoonyakasha.planet.on_foot). The ship, a hover car, floats
 HOVER_HEIGHT above the ground 16 m south of the blocks as a landmark, a
 static box in the physics. The outposts on the planet and the moon are
-found by the same survey as in planet.py and drawn as pads. Lakes on the
+found by the same survey as in planet.py and built from the outposts' kit
+(outposts.Pads), their parts in the physics near the player
+(outpost_bodies.py). Lakes on the
 planet within 40 km of the site (shoonyakasha.planet.lakes) are surveyed
 with them and kept clear of the outposts' sites and the site's pad; then
 the rivers are traced over a height grid around the site
@@ -298,7 +300,8 @@ from outposts import home_outpost
 from explored_map import ExploredMap, MapView
 from hud import Hud
 from viewmodel import Glows, Viewmodel
-from play.core import RAIN_DROPS, args, blocks, bodies, box, engine, foot, pads, save_base, settings, state, world
+from play.core import (RAIN_DROPS, args, blocks, bodies, box, engine, foot, outpost_bodies, pads, save_base, settings,
+                       state, world)
 from play import (apps, apps_trade, checks, contracting, economy, exploring, loops, menus, music, saving, showers,
                   site, sounds, spaceflight, storms, survival, vehicle, walking)
 import slate
@@ -345,6 +348,7 @@ def frame(dt):
         if foot.bubble is None and (state.vehicle.car.height or 0.0) < 0.5 * Bubble.RADIUS:
             foot.ensure_bubble(viewpoint)
     foot.step(dt, viewpoint, state.view.position, latency, active=active, before_step=vehicle.move_car_body)
+    outpost_bodies.update(foot.bubble, viewpoint)
     showers.update_showers()
     storms.update_storms(dt)
     foot.props.probe(foot.bubble, EXTRA_PROBES)
@@ -363,7 +367,8 @@ def frame(dt):
     ground = world.site_ground()
     for entity, offset in blocks:
         engine.scene.set_position(entity, sub(add(ground, offset), camera))
-    pads.draw(camera)
+    pads.draw(camera, world.sun_direction(), world.time)
+    outpost_bodies.draw(camera)
     vehicle.draw_net(camera)
     exploring.draw_poi_scenes(camera)
     showers.draw_showers(camera, basis)
@@ -372,6 +377,7 @@ def frame(dt):
     site.place_ship(camera)
     walking.place_viewmodel(dt, camera)
     economy.update_fuel_call()
+    economy.update_ore_bins()
     survival.update_suit(dt)
     exploring.update_pois(dt)
     contracting.update_contracts(dt)

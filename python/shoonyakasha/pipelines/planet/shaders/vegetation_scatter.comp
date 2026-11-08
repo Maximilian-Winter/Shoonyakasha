@@ -46,6 +46,21 @@
 // its range; on the moon its colour carries VEGETATION_ON_MOON. A rock
 // whose cell is in TakenRocks (rockTaken) is left out.
 //
+// Scans (with vegetation.scans.x on, on the planet), on two grids: the
+// large scans on SCAN_CELLS of the trees' cells per side within
+// vegetation.scans.y, the small ones (SCAN_SMALL) on SCAN_NEAR_CELLS within
+// SCAN_NEAR_RANGE, each hash salted apart (SCAN_SALT, SCAN_NEAR_SALT). A
+// candidate is kept by a draw against its families' chances (scanFamilies,
+// times the grid's SCAN_FAR_CHANCES or SCAN_NEAR_CHANCES): the desert's on
+// dry ground, the forest floor's under the trees' cover, the rocks' on
+// rock and dry ground; a second draw picks a kind of that family and grid
+// by SCAN_WEIGHTS (the kinds and their heights as
+// shoonyakasha.planet.scans.SCANS). Its size shrinks over the last 15 % of
+// the grid's range; its colour is white (its texture's own), tinted as any
+// plant. A scanned rock (SCAN_ROCK) is listed in NearbyTrees as the rocks
+// are, and left out when its cell is taken: grid 2 for the large scans', 3
+// for the small scans'.
+//
 // Nothing is placed under a lake's or a river's water (candidateWet).
 // The clearings (clearings.glsl, candidateCleared) leave out the plants and
 // the rocks of the kinds they clear: within a clearing all of them, in its
@@ -93,6 +108,29 @@ const int MOON_SALT = 40;           // tells the moon's boulder grid from the pl
 const int ROCK_SALT = 16;           // the small rocks' grid; 8 more on the moon
 const float MOON_ROCK_CELLS = 0.25; // the moon's grids' cells per face side, of the planet's: as large as the
                                     // planet's on a quarter of its radius
+const int SCAN_SALT = 64;           // tells the large scans' grid from the others in the hash
+const int SCAN_NEAR_SALT = 72;      // and the small scans'
+const float SCAN_CELLS = 0.5;       // the large scans' grid's cells per face side, of the trees' (19 m)
+const float SCAN_NEAR_CELLS = 2.0;  // the small scans' (4.8 m)
+const float SCAN_NEAR_RANGE = 250.0;
+const vec3 SCAN_FAR_CHANCES = vec3(0.35, 0.25, 0.15);   // desert, forest floor, rock: a large scan's chance
+const vec3 SCAN_NEAR_CHANCES = vec3(0.3, 0.35, 0.0);    // and a small one's, at full family weight
+const float SCAN_ROCK_DRY = 0.25;   // of the rocks' family on dry ground
+const int FAMILY_DESERT = 0;
+const int FAMILY_FOREST = 1;
+const int FAMILY_ROCK = 2;
+// Each scan kind (from VEGETATION_SCAN_FIRST): its family, heights (m) and weight within its family.
+const int SCAN_FAMILY[VEGETATION_SCANS] = int[VEGETATION_SCANS](2, 2, 2, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2);
+const vec2 SCAN_HEIGHTS[VEGETATION_SCANS] = vec2[VEGETATION_SCANS](
+    vec2(1.1, 1.8), vec2(1.4, 2.4), vec2(0.8, 1.4), vec2(0.25, 0.5), vec2(0.25, 0.5), vec2(2.0, 3.6),
+    vec2(0.6, 1.2), vec2(0.7, 1.3), vec2(0.12, 0.25), vec2(0.35, 0.7), vec2(0.3, 0.6), vec2(0.25, 0.4),
+    vec2(0.25, 0.45), vec2(2.5, 4.5), vec2(2.5, 4.5));
+const float SCAN_WEIGHTS[VEGETATION_SCANS] = float[VEGETATION_SCANS](
+    1.0, 1.0, 1.0, 3.0, 3.0, 0.6, 2.0, 2.0, 2.5, 3.0, 3.0, 1.0, 1.5, 0.8, 0.6);
+const bool SCAN_ROCK[VEGETATION_SCANS] = bool[VEGETATION_SCANS](
+    true, true, true, true, true, false, false, false, false, false, false, false, false, true, true);
+const bool SCAN_SMALL[VEGETATION_SCANS] = bool[VEGETATION_SCANS](
+    false, false, false, true, true, false, false, false, true, true, true, false, true, false, false);
 const vec3 PLANET_ROCK = vec3(0.39, 0.35, 0.33);
 const vec3 MOON_ROCK = vec3(0.2, 0.195, 0.185);
 const float ORE_ROCKS = 0.3;        // richness above which rocks are ore
@@ -166,6 +204,8 @@ bool rockTaken(int body, int face, int grid, ivec2 cell) {
 // biomes (desert, steppe, tundra) and rock (groundCover's steep or high
 // rock), fewer on snow, none on beaches; boulders on the rock, a few on dry
 // biomes. On the moon: by the slope, so crater walls and rims hold the most.
+const float SCREE_ROCKS = 0.6;   // the small rocks' chance added on full scree
+
 void rockChances(int body, vec3 radial, float height, vec3 normal, vec3 climate, out float small,
                  out float boulder) {
     float slope = 1.0 - dot(normal, radial);
@@ -180,12 +220,12 @@ void rockChances(int body, vec3 radial, float height, vec3 normal, vec3 climate,
     if (height < 0.0) return;
     vec3 c = climateWithSettings(climate);
     float rock, snow, beach;
-    groundCover(height, slope, c.x, rock, snow, beach);
+    groundCover(radial, normal, height, c.x, rock, snow, beach);
     float biomes[BIOMES];
     biomeWeights(c.x, c.y, biomes);
     float dry = biomes[BIOME_DESERT] + biomes[BIOME_STEPPE] + biomes[BIOME_TUNDRA];
     float open = 1.0 - beach;
-    small = (0.03 + 0.3 * dry + 0.5 * rock) * open * (1.0 - 0.7 * snow);
+    small = (0.03 + 0.3 * dry + 0.5 * rock + SCREE_ROCKS * screeOfClimate(c)) * open * (1.0 - 0.7 * snow);
     boulder = (0.015 * dry + 0.25 * rock) * open;
 }
 
@@ -227,15 +267,100 @@ void place(ScatterChunk chunk, Candidate x, int kind, float size, float turn, fl
            uint resourceId) {
     vec3 drawn = candidateDrawn(chunk, x);
     bool trunk = kind < VEGETATION_TREE_KINDS || kind == KIND_CACTUS;
-    bool rock = kind == KIND_ROCK || kind == KIND_BOULDER;
+    bool rock = kind == KIND_ROCK || kind == KIND_BOULDER
+                || (kind >= VEGETATION_SCAN_FIRST && SCAN_ROCK[kind - VEGETATION_SCAN_FIRST]);
     if ((trunk || rock) && x.distance <= vegetation.nearby.x) {
         listNearby(drawn, size, tint, kind, grade, resourceId, chunk.face, x.cell, chunk.body, turn);
     }
     uint capacity = uint(vegetation.lod.z);
     uint at;
-    if (!claimInstance(uint(kind), uint(kind) * capacity, capacity, at)) return;
+    if (!claimInstance(uint(kind), vegetationFirstInstance(kind, capacity, uint(vegetation.grass.w)), capacity, at)) {
+        return;
+    }
     instances.data[at] = vec4(drawn, size);
     instances.data[at + 1u] = vec4(cos(turn), sin(turn), vegetationPackTint(tint, resourceId), colour);
+}
+
+// The weights of the desert, forest-floor and rock families on the ground
+// under a candidate, 0 .. 1: none on the sea floor or beaches; the desert's
+// on the desert and steppe biomes off rock, fewer on snow; the forest
+// floor's with the trees' chance (biomePlants); the rocks' on rock,
+// SCAN_ROCK_DRY of it on dry biomes.
+vec3 scanFamilies(vec3 radial, float height, vec3 normal, vec3 climate) {
+    if (height < 0.0) return vec3(0.0);
+    float slope = 1.0 - dot(normal, radial);
+    vec3 c = climateWithSettings(climate);
+    float rock, snow, beach;
+    groundCover(radial, normal, height, c.x, rock, snow, beach);
+    float biomes[BIOMES];
+    biomeWeights(c.x, c.y, biomes);
+    float dry = biomes[BIOME_DESERT] + biomes[BIOME_STEPPE];
+    float open = 1.0 - beach;
+    vec3 leaf, grass, forms;
+    vec4 plants = biomePlants(radial, height, normal, climate, leaf, grass, forms);
+    return vec3(dry * (1.0 - rock) * (1.0 - snow), min(plants.x, 1.0) * (1.0 - snow),
+                min(rock + SCAN_ROCK_DRY * dry, 1.0)) * open;
+}
+
+// A scan kind of `family`, small or not, by `which` (0 .. 1) against
+// SCAN_WEIGHTS; -1 when there is none.
+int scanKind(int family, bool small, float which) {
+    float total = 0.0;
+    for (int k = 0; k < VEGETATION_SCANS; ++k) {
+        if (SCAN_FAMILY[k] == family && SCAN_SMALL[k] == small) total += SCAN_WEIGHTS[k];
+    }
+    float at = which * total;
+    int last = -1;
+    for (int k = 0; k < VEGETATION_SCANS; ++k) {
+        if (SCAN_FAMILY[k] != family || SCAN_SMALL[k] != small) continue;
+        last = k;
+        at -= SCAN_WEIGHTS[k];
+        if (at < 0.0) return k;
+    }
+    return last;
+}
+
+// The scans of one grid of `chunk` (small: the near grid; else the far one).
+void scatterScans(ScatterChunk chunk, bool small, float density) {
+    float range = small ? SCAN_NEAR_RANGE : vegetation.scans.y;
+    if (chunk.nearest > range) return;
+    float cells = vegetation.settings.z * (small ? SCAN_NEAR_CELLS : SCAN_CELLS);
+    vec3 chances = small ? SCAN_NEAR_CHANCES : SCAN_FAR_CHANCES;
+    int salt = small ? SCAN_NEAR_SALT : SCAN_SALT;
+    int cu0, cv0;
+    uint across, count;
+    scatterCells(chunk, cells, cu0, cv0, across, count);
+    for (uint k = gl_LocalInvocationID.x; k < count; k += 64u) {
+        Candidate x;
+        if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, salt, range, x)) continue;
+        float pick = nextRandom(x.hash);
+        float which = nextRandom(x.hash);
+        float grow = nextRandom(x.hash);
+        float turn = 6.2831853 * nextRandom(x.hash);
+        float tint = nextRandom(x.hash);
+        if (pick >= density) continue;                            // chances are at most 1
+        vec3 radial, normal, climate;
+        float height;
+        candidateGround(chunk, x, radial, height, normal, climate);
+        vec3 families = density * chances * scanFamilies(radial, height, normal, climate);
+        int family;
+        if (pick < families.x) family = FAMILY_DESERT;
+        else if (pick < families.x + families.y) family = FAMILY_FOREST;
+        else if (pick < families.x + families.y + families.z) family = FAMILY_ROCK;
+        else continue;
+        int scan = scanKind(family, small, which);
+        if (scan < 0) continue;
+        if (SCAN_ROCK[scan] && rockTaken(chunk.body, chunk.face, small ? 3 : 2, x.cell)) continue;
+        float size = mix(SCAN_HEIGHTS[scan].x, SCAN_HEIGHTS[scan].y, grow)
+                     * smoothstep(range, range * FADE_START, x.distance);
+        if (size < 0.02) continue;
+        if (candidateWet(chunk, radial)
+            || candidateCleared(chunk, x, radial, family == FAMILY_ROCK ? CLEAR_ROCKS : CLEAR_PLANTS, salt)) {
+            continue;
+        }
+        place(chunk, x, VEGETATION_SCAN_FIRST + scan, size, turn, tint, vegetationPackColour(vec3(1.0)), 0u,
+              RESOURCE_NONE);
+    }
 }
 
 void main() {
@@ -328,6 +453,12 @@ void main() {
             if (candidateWet(chunk, radial) || candidateCleared(chunk, x, radial, CLEAR_PLANTS, 0)) continue;
             place(chunk, x, kind, size, turn, tint, colour, 0u, RESOURCE_NONE);
         }
+    }
+
+    // The scans' two grids.
+    if (vegetation.scans.x != 0.0 && !moon) {
+        scatterScans(chunk, false, density);
+        scatterScans(chunk, true, density);
     }
 
     // The small rocks' grid.

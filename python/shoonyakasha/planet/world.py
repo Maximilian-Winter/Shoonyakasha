@@ -72,7 +72,8 @@ batches in the patch's slots; the planet waits for `end_survey`, and
 The vegetation (vegetation.py's kinds) and, with `rocks`, the rocks on
 both bodies are scattered on the GPU each frame (vegetation_scatter.comp,
 grass_scatter.comp); `taken_rocks` (rocks.TakenRocks) holds the cells
-whose rocks the scatter leaves out.
+whose rocks the scatter leaves out. With `scans`, the prepared scans
+(scans.py) grow among them within SCAN_RANGE on the planet.
 """
 
 import math
@@ -81,7 +82,7 @@ from pathlib import Path
 
 import numpy as np
 
-from . import cube_sphere, ground_textures, orbits, shadows, vegetation, vegetation_impostors, vegetation_textures
+from . import cube_sphere, ground_textures, orbits, scans, shadows, vegetation, vegetation_impostors, vegetation_textures
 from . import rivers as river_tools
 from . import wind as wind_field
 from .rocks import TakenRocks
@@ -143,6 +144,7 @@ GRASS_RANGE = 150.0
 # 0.6 m on the moon) and their range (m). Boulders lie on the trees' grid within the bushes' range.
 ROCK_CELLS = 65536
 ROCK_RANGE = 150.0
+SCAN_RANGE = 1_200.0             # m the scans are drawn within (vegetation_scatter.comp's scans' grid)
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -172,6 +174,7 @@ TERRAIN = {
     "hills": [40.0, 150.0, 1500.0, 6.0],    # frequency, height (m), ocean depth (m), octaves
     "seed": [0.0, 0.0, 0.0, 0.0],           # offset added to the noise input
     "detail": [80.0, 15.0, 4.0, 0.5],       # wavelength (m), height (m), octaves, erosion
+    "gullies": [50.0, 900.0, 4.0, 0.25],    # depth (m), wavelength (m), octaves, slope (m/m) at full depth
 }
 SITE_FACE = 4                    # +Z
 SITE_UV = 1.0 / 64.0             # along u and v from the face's centre: a vertex of every chunk from level 3 down
@@ -524,12 +527,23 @@ def horizon_tolerance(elevation):
 def terrain_floor(body):
     """Metres above `body`'s radius that no terrain goes below: its
     `floor`, or from its terrain parameters the seabed's depth, or on land
-    the continent's edge plus the hills' and the detail's heights, both
-    with 10 % to spare (terrain.glsl's noise stays within [-1, 1])."""
+    the continent's edge plus the hills', the gullies' (twice their depth,
+    more than their octaves add up to) and the detail's heights, both with 10 % to
+    spare (terrain.glsl's noise stays within [-1, 1])."""
     if body.floor is not None:
         return body.floor
     terrain = body.terrain
-    return -1.1 * max(terrain["hills"][2], 0.05 * terrain["continent"][3] + terrain["hills"][1] + terrain["detail"][1])
+    gullies = 2.0 * terrain.get("gullies", (0.0,))[0]
+    return -1.1 * max(terrain["hills"][2],
+                      0.05 * terrain["continent"][3] + terrain["hills"][1] + gullies + terrain["detail"][1])
+
+
+def complete_terrain(terrain):
+    """A copy of terrain parameters (a saved planet's) with each one it
+    lacks taken from TERRAIN."""
+    out = {name: list(value) for name, value in TERRAIN.items()}
+    out.update({name: list(value) for name, value in terrain.items()})
+    return out
 
 
 class PlanetWorld:
@@ -603,6 +617,9 @@ class PlanetWorld:
         self.grass = True
         self.grass_range = GRASS_RANGE
         self.rocks = True
+        self.scans = True
+        self.scan_grid = (1, 1)            # the scans' atlas's columns and rows of cells
+        self.scans_prepared = False        # whether every scan kind was prepared (scans.available)
         self.taken_rocks = TakenRocks(engine)   # the cells whose rocks the scatter leaves out
         self.vegetation_draws = None       # the kinds' draws with no instances, set again each frame
         self.vegetation_scans = False      # whether the vegetation's textures came from the downloaded scans
@@ -805,8 +822,8 @@ class PlanetWorld:
     def upload_vegetation_meshes(self):
         """The vegetation's textures (vegetation_textures: the foliage atlas
         and the bark), the trees' impostors baked from their meshes and those
-        (vegetation_impostors), the meshes (vegetation.py) and the draws'
-        template."""
+        (vegetation_impostors), the scans' atlases (scans.atlas), the meshes
+        (vegetation.py, with the prepared scans) and the draws' template."""
         engine = self.engine
         atlas, bark = vegetation_textures.atlas(), vegetation_textures.bark()
         albedo, normals, rects = vegetation_impostors.bake(vegetation.trees(), atlas, bark)
@@ -815,11 +832,16 @@ class PlanetWorld:
         engine.set_pipeline_image_data("vegetationImpostor", albedo, format="R8G8B8A8_SRGB", mipmaps=True)
         engine.set_pipeline_image_data("vegetationImpostorNormal", normals, format="R8G8B8A8_UNORM", mipmaps=True)
         self.vegetation_scans = vegetation_textures.available()
-        vertices, indices, ranges = vegetation.meshes(rects)
+        scan_albedo, scan_normals, cells, columns, rows = scans.atlas()
+        engine.set_pipeline_image_data("scanAlbedo", scan_albedo, format="R8G8B8A8_SRGB", mipmaps=True)
+        engine.set_pipeline_image_data("scanNormal", scan_normals, format="R8G8B8A8_UNORM", mipmaps=True)
+        self.scan_grid = (columns, rows)
+        self.scans_prepared = scans.available()
+        vertices, indices, ranges = vegetation.meshes(rects, cells)
         self.engine.set_buffer("VegetationMesh", vertices)
         self.engine.set_buffer("VegetationIndices", indices)
-        firsts = [kind * VEGETATION_CAPACITY for kind in range(len(vegetation.KINDS))]
-        self.vegetation_draws = vegetation.draw_template(ranges, firsts)
+        self.vegetation_draws = vegetation.draw_template(ranges,
+                                                         vegetation.instance_firsts(VEGETATION_CAPACITY, GRASS_CAPACITY))
 
     def upload_vegetation(self):
         """This frame's vegetation settings, and its draws with no instances,
@@ -843,6 +865,8 @@ class PlanetWorld:
         moon = self.moon
         relative = sub(moon.centre(), self.position) if moon is not None else (0.0, 0.0, 0.0)
         engine.set_custom_vec4("planet.vegetation.moon", tuple(relative) + (0.0,))
+        engine.set_custom_vec4("planet.vegetation.scans", (1.0 if self.scans and self.vegetation else 0.0, SCAN_RANGE,
+                                                           float(self.scan_grid[0]), float(self.scan_grid[1])))
         if self.vegetation_draws is not None:
             engine.set_buffer("VegetationDraws", self.vegetation_draws)
 

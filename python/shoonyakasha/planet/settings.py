@@ -190,7 +190,8 @@ class TerrainEdit:
 def planet_items(world, edit, new_seed, keys=None):
     """A new seed (`new_seed()`, at once), and the terrain's mountain and
     hill heights, continent frequency, sea level bias, ocean depth, detail
-    height and erosion in `edit` (a TerrainEdit), which Apply takes on."""
+    height, erosion and gullies' depth and wavelength in `edit` (a
+    TerrainEdit), which Apply takes on."""
     return _with_keys([
         {"heading": "Planet"},
         {"button": "New seed", "do": new_seed, "hint": "Builds a new planet from a random seed at once."},
@@ -212,6 +213,12 @@ def planet_items(world, edit, new_seed, keys=None):
         {"slider": "Erosion", "min": 0.0, "max": 4.0, "get": edit.get("detail", 3),
          "set": edit.set("detail", 3), "format": "%.2f",
          "hint": "How much the slopes smooth the hills and the detail. Taken on by Apply, below."},
+        {"slider": "Gully depth", "min": 0.0, "max": 200.0, "get": edit.get("gullies", 0),
+         "set": edit.set("gullies", 0), "format": "%.0f m",
+         "hint": "How deep the gullies down the slopes are cut; 0 for none. Taken on by Apply, below."},
+        {"slider": "Gully wavelength", "min": 300.0, "max": 4000.0, "get": edit.get("gullies", 1),
+         "set": edit.set("gullies", 1), "format": "%.0f m",
+         "hint": "How far apart the largest gullies run. Taken on by Apply, below."},
         {"button": "Apply: build the planet again", "do": edit.apply,
          "hint": "Builds the planet again with the settings above."},
     ], keys)

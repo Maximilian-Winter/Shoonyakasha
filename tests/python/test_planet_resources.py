@@ -32,7 +32,7 @@ KERNEL = """#version 450
 layout(local_size_x = 64) in;
 layout(std140, set = 0, binding = 0) uniform TerrainParams {
     vec4 continent; vec4 mountains; vec4 hills; vec4 seed; vec4 site; vec4 siteShape; vec4 detail;
-    vec4 climate; vec4 biomeView;
+    vec4 climate; vec4 biomeView; vec4 gullies;
 } terrain;
 layout(std430, set = 0, binding = 1) readonly buffer Inputs { vec4 items[]; } src;
 layout(std430, set = 0, binding = 2) writeonly buffer Outputs { vec4 values[]; } dst;
@@ -101,8 +101,8 @@ class ResourcesShader(unittest.TestCase):
     def run_kernel(self, mode, seed=(0.0, 0.0, 0.0), rows=1):
         t = world.TERRAIN
         params = (list(t["continent"]) + list(t["mountains"]) + list(t["hills"]) + list(seed) + [0.0] + [0.0] * 4
-                  + [150.0, 600.0, world.RADIUS, 0.0] + list(t["detail"]) + [0.0] * 8)
-        uniform = self.ctx.upload(struct.pack("<36f", *params))
+                  + [150.0, 600.0, world.RADIUS, 0.0] + list(t["detail"]) + [0.0] * 12)
+        uniform = self.ctx.upload(struct.pack("<40f", *params))
         out = np.zeros((COUNT * rows, 4), dtype=np.float32)
         self.ctx.run(self.kernel, [uniform, self.items, out], threads=COUNT, push=struct.pack("<II", COUNT, mode))
         return out.reshape(COUNT, rows * 4)

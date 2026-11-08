@@ -5,7 +5,8 @@
 // vertices' climate (biome.glsl's groundLayers), under a lake's or a river's
 // water as the sea floor at the water's depth (lakes.glsl's lakeAt,
 // rivers.glsl's riverAt, tested where a vertex of its triangle has water
-// near, terrain.vert), and the moon's grey
+// near, terrain.vert), darkened where it is wet just above the sea or a
+// lake near it (geology.glsl's wetShore), and the moon's grey
 // (moonColour), both detailed by the ground's textures (ground.glsl); with
 // the biome view on (terrain.biomeView.x), the planet's ground takes its
 // biomes' flat colours (biomeViewColour) instead. Otherwise it takes the
@@ -83,6 +84,10 @@ void main() {
         } else {
             groundLayers(radial, height, normal, fragClimate, weights, colours);
             groundTextured(weights, colours, fragRelativePos, fragBody, normal, albedo, shaded);
+            float wet = wetShore(radial, height);
+            int lake = fragWaterNear > 0.0 ? lakeNear(radial, WET_HEIGHT * 20.0) : -1;
+            if (lake >= 0) wet = max(wet, wetShore(radial, height - terrain.lakes[lake].w));
+            albedo *= 1.0 - WET_DARKEN * wet;
         }
     }
     if (fragBody == MOON) {

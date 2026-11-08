@@ -88,7 +88,7 @@ def update_outposts():
     frame = rivers.GridFrame(home.direction, planet.radius)
     world.request_height_grid(frame)
     state.site.survey = ("rivers", frame, avoid)
-    pads.build(state.site.outposts)
+    pads.build(state.site.outposts, tuple(planet.terrain["seed"]))
 
 
 def update_rivers():

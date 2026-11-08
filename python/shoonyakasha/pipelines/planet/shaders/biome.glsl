@@ -22,8 +22,13 @@
 //
 // Each band edge is a smoothstep BIOME_T_BLEND degrees or BIOME_M_BLEND of
 // moisture to either side, so the weights sum to 1 and change smoothly.
-// Snow lies where the temperature is below SNOW_TEMPERATURE, on slopes
-// less steep than a cliff; sand on beaches below 40 m; rock on steep slopes.
+// Snow lies where the temperature, warmer or colder by the slope's aspect
+// (geology.glsl's aspectWarmth), is below SNOW_TEMPERATURE, on slopes less
+// steep than a cliff; sand on beaches below 40 m; rock on steep slopes;
+// scree (geology.glsl) on the open ground under cliffs. A climate's cover
+// (z) is read through coverOfClimate, its scree through screeOfClimate.
+
+#include "geology.glsl"
 
 const int BIOME_DESERT = 0;
 const int BIOME_SAVANNA = 1;
@@ -178,28 +183,34 @@ float coverForest(float cover) {
 }
 
 // The ground's open share at a point: not rock, snow or beach. Plants grow
-// on it alone; `slope` is 0 flat .. 1 vertical, `height` metres above sea level.
-void groundCover(float height, float slope, float temperature, out float rock, out float snow, out float beach) {
+// on it alone; `radial` and `normal` give its slope (0 flat .. 1 vertical)
+// and aspect, `height` is metres above sea level.
+void groundCover(vec3 radial, vec3 normal, float height, float temperature, out float rock, out float snow,
+                 out float beach) {
+    float slope = 1.0 - dot(normal, radial);
+    float cold = temperature + aspectWarmth(radial, normal);
     rock = smoothstep(0.12, 0.22, slope);
-    snow = (1.0 - smoothstep(SNOW_TEMPERATURE - 1.5, SNOW_TEMPERATURE + 1.5, temperature))
+    snow = (1.0 - smoothstep(SNOW_TEMPERATURE - 1.5, SNOW_TEMPERATURE + 1.5, cold))
          * (1.0 - smoothstep(0.35, 0.5, slope));
     beach = 1.0 - smoothstep(10.0, 40.0, height);
 }
 
 // The planet's ground as weights of the layers (ground.glsl) and their
 // colours: the sea floor (on the sand's texture) darker with depth; beach
-// sand below 40 m; rock where the slope is steep; snow where it is cold;
-// elsewhere each biome's shares of sand, dry ground, grass, forest and
-// rock in its colours (sand its soil, dry ground between its soil and its
-// plants, grass its plants, forest its canopy), the forest share thinned
-// to grass where the cover is low. `climate` is the vertices' (horizon.yzw).
+// sand below 40 m; rock where the slope is steep, in its strata
+// (strataShade); snow where it is cold; elsewhere each biome's shares of
+// sand, dry ground, grass, forest and rock in its colours (sand its soil,
+// dry ground between its soil and its plants, grass its plants, forest its
+// canopy), the forest share thinned to grass where the cover is low, and
+// the scree's share of all but the rock turned to dry ground in SCREE.
+// `climate` is the vertices' (horizon.yzw).
 void groundLayers(vec3 radial, float height, vec3 normal, vec3 climate, out float weights[GROUND_LAYERS],
                   out vec3 colours[GROUND_LAYERS]) {
     for (int i = 0; i < GROUND_LAYERS; ++i) {
         weights[i] = 0.0;
         colours[i] = vec3(0.0);
     }
-    colours[GROUND_ROCK] = ROCK;
+    colours[GROUND_ROCK] = ROCK * strataShade(radial, height);
     colours[GROUND_SNOW] = SNOW;
     if (height < 0.0) {
         weights[GROUND_SAND] = 1.0;
@@ -207,14 +218,13 @@ void groundLayers(vec3 radial, float height, vec3 normal, vec3 climate, out floa
         return;
     }
     vec3 c = climateWithSettings(climate);
-    float slope = 1.0 - dot(normal, radial);                  // 0 flat, 1 vertical
     float rock, snow, beach;
-    groundCover(height, slope, c.x, rock, snow, beach);
+    groundCover(radial, normal, height, c.x, rock, snow, beach);
     float open = (1.0 - rock) * (1.0 - snow) * (1.0 - beach);
 
     float biomes[BIOMES];
     biomeWeights(c.x, c.y, biomes);
-    float forestKept = coverForest(c.z);
+    float forestKept = coverForest(coverOfClimate(c));
     vec3 sums[4] = vec3[4](vec3(0.0), vec3(0.0), vec3(0.0), vec3(0.0));
     float shares[5] = float[5](0.0, 0.0, 0.0, 0.0, 0.0);
     for (int b = 0; b < BIOMES; ++b) {
@@ -238,6 +248,16 @@ void groundLayers(vec3 radial, float height, vec3 normal, vec3 climate, out floa
                                beach / max(beach + shares[GROUND_SAND] * (1.0 - beach), 1e-4));
     weights[GROUND_ROCK] = rock * (1.0 - snow) + shares[4] * open;
     weights[GROUND_SNOW] = snow;
+    float scree = screeOfClimate(c);
+    if (scree > 0.0) {
+        float moved = 0.0;
+        for (int i = 0; i < 4; ++i) {
+            moved += weights[i] * scree;
+            weights[i] *= 1.0 - scree;
+        }
+        colours[GROUND_DRY] = mix(colours[GROUND_DRY], SCREE, moved / max(weights[GROUND_DRY] + moved, 1e-4));
+        weights[GROUND_DRY] += moved;
+    }
 }
 
 // The ground's colour in the biome view: each biome's flat colour by its
@@ -246,7 +266,7 @@ vec3 biomeViewColour(vec3 radial, float height, vec3 normal, vec3 climate) {
     if (height < 0.0) return vec3(0.02, 0.05, 0.25);
     vec3 c = climateWithSettings(climate);
     float rock, snow, beach;
-    groundCover(height, 1.0 - dot(normal, radial), c.x, rock, snow, beach);
+    groundCover(radial, normal, height, c.x, rock, snow, beach);
     float biomes[BIOMES];
     biomeWeights(c.x, c.y, biomes);
     vec3 colour = vec3(0.0);
@@ -258,8 +278,8 @@ vec3 biomeViewColour(vec3 radial, float height, vec3 normal, vec3 climate) {
 
 // What grows at a point, the biomes' values weighted: x the tree chance,
 // y the conifers' share of trees, z the bush chance, w the grass chance,
-// all times the open share (not rock, snow, beach or sea floor) and trees
-// times the cover's grove or clearing; `leaf` the trees' and bushes'
+// all times the open share (not rock, snow, beach, scree or sea floor) and
+// trees times the cover's grove or clearing; `leaf` the trees' and bushes'
 // foliage colour (the canopy's times LEAF_FROM_CANOPY) and `grass` the
 // grass's (its ground's plants, towards the soil by how dry the biome's
 // grass is), on the palette; `forms` the biomes' BIOME_FORMS weighted.
@@ -271,8 +291,8 @@ vec4 biomePlants(vec3 radial, float height, vec3 normal, vec3 climate, out vec3 
     if (height < 0.0) return vec4(0.0);
     vec3 c = climateWithSettings(climate);
     float rock, snow, beach;
-    groundCover(height, 1.0 - dot(normal, radial), c.x, rock, snow, beach);
-    float open = (1.0 - rock) * (1.0 - snow) * (1.0 - beach);
+    groundCover(radial, normal, height, c.x, rock, snow, beach);
+    float open = (1.0 - rock) * (1.0 - snow) * (1.0 - beach) * (1.0 - screeOfClimate(c));
     float biomes[BIOMES];
     biomeWeights(c.x, c.y, biomes);
     vec4 plants = vec4(0.0);
@@ -285,7 +305,7 @@ vec4 biomePlants(vec3 radial, float height, vec3 normal, vec3 climate, out vec3 
         forms += w * vec3(BIOME_FORMS[b * 3], BIOME_FORMS[b * 3 + 1], BIOME_FORMS[b * 3 + 2]);
         grass += w * mix(biomePlant(b), mix(biomeSoil(b), biomePlant(b), 0.5), BIOME_PLANTS[b * 5 + 4] * 0.5);
     }
-    plants.x *= mix(0.2, 1.4, smoothstep(0.25, 0.75, c.z));
+    plants.x *= mix(0.2, 1.4, smoothstep(0.25, 0.75, coverOfClimate(c)));
     plants.xzw *= open;
     return plants;
 }

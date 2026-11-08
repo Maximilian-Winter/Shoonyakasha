@@ -7,7 +7,7 @@
 // from the camera than the cascade's far split and SHADOW_VEGETATION_MARGIN
 // are left out of it: their vertices go to one point outside the map. The
 // fragment shader (shadow_vegetation.frag) gets the part and the texture's
-// (u, v).
+// (u, v), and a scan's cell in the scans' atlas.
 //
 
 layout(set = 0, binding = 0) uniform ShadowParams {
@@ -35,6 +35,7 @@ layout(location = 2) in vec4 inColour;     // w: v
 
 layout(location = 0) flat out int fragPart;
 layout(location = 1) out vec2 fragUv;
+layout(location = 2) flat out vec4 fragCell;
 
 const float SHADOW_VEGETATION_MARGIN = 100.0;
 
@@ -44,6 +45,14 @@ void main() {
     mat4 viewProj = shadow.viewProj[cascade.index];
     fragPart = int(inNormal.w + 0.5);
     fragUv = vec2(inPosition.w, inColour.w);
+    fragCell = vec4(0.0);
+    if (fragPart >= VEGETATION_PART_SCAN) {
+        int cell;
+        bool cutout;
+        float sign;
+        vegetationScanPart(fragPart, cell, cutout, sign);
+        fragCell = vegetationScanCell(cell);
+    }
     if (length(placed.xyz) > shadow.splits[cascade.index] + SHADOW_VEGETATION_MARGIN) {
         gl_Position = vec4(2.0, 2.0, 0.5, 1.0);
         return;

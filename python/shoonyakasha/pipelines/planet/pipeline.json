@@ -103,6 +103,8 @@
           "default": [ 0.0, 0.0, 0.0, 0.0 ] },
         { "name": "biomeView", "type": "vec4", "source": "scene.custom.planet.terrain.biomeView",
           "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "gullies", "type": "vec4", "source": "scene.custom.planet.terrain.gullies",
+          "default": [ 0.0, 900.0, 4.0, 0.25 ] },
         { "name": "sites", "type": "vec4", "arrayCount": 8, "source": "scene.custom.planet.terrain.sites[i]" },
         { "name": "siteShapes", "type": "vec4", "arrayCount": 8,
           "source": "scene.custom.planet.terrain.siteShapes[i]" },
@@ -229,6 +231,8 @@
           "default": [ 0.0, 150.0, 65536.0, 0.0 ] },
         { "name": "moon", "type": "vec4", "source": "scene.custom.planet.vegetation.moon",
           "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "scans", "type": "vec4", "source": "scene.custom.planet.vegetation.scans",
+          "default": [ 0.0, 1200.0, 1.0, 1.0 ] },
         { "name": "clearings", "type": "vec4", "arrayCount": 32,
           "source": "scene.custom.planet.vegetation.clearings[i]" },
         { "name": "clearingShapes", "type": "vec4", "arrayCount": 32,
@@ -247,7 +251,7 @@
     "VegetationMesh": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 8192,
+      "elementCount": 65536,
       "fields": [
         { "name": "position", "type": "vec4" },
         { "name": "normal", "type": "vec4" },
@@ -257,20 +261,20 @@
     "VegetationIndices": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 16384,
+      "elementCount": 196608,
       "fields": [ { "name": "index", "type": "uint" } ]
     },
     "VegetationInstances": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 1114112,
+      "elementCount": 2097152,
       "fields": [ { "name": "data", "type": "vec4" } ],
       "memory": { "location": "device_local" }
     },
     "VegetationDraws": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 82,
+      "elementCount": 160,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
     "RiverData": {
@@ -618,7 +622,11 @@
           "externalImage": "vegetationImpostor", "autoBindSampler": "groundRepeat" },
         { "binding": 3, "type": "combined_image_sampler", "stages": [ "fragment" ],
           "name": "vegetationImpostorNormal", "externalImage": "vegetationImpostorNormal",
-          "autoBindSampler": "groundRepeat" }
+          "autoBindSampler": "groundRepeat" },
+        { "binding": 4, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "scanAlbedo",
+          "externalImage": "scanAlbedo", "autoBindSampler": "groundRepeat" },
+        { "binding": 5, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "scanNormal",
+          "externalImage": "scanNormal", "autoBindSampler": "groundRepeat" }
       ]
     },
     "groundSet": {
@@ -865,6 +873,34 @@
       ]
     },
     {
+      "name": "ShadowScans{cascade}",
+      "type": "graphics",
+      "repeat": { "count": 4, "index": "cascade" },
+      "execution": {
+        "type": "draw_indexed_indirect",
+        "vertexBuffer": { "buffer": "VegetationMesh" },
+        "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
+        "arguments": { "buffer": "VegetationDraws", "offset": 320, "drawCount": 15, "stride": 20 }
+      },
+      "pipeline": {
+        "vertexShader": "shaders/shadow_vegetation.vert.spv",
+        "fragmentShader": "shaders/shadow_vegetation.frag.spv",
+        "vertexInput": "vegetationVertex",
+        "depthTest": true,
+        "depthWrite": true,
+        "depthCompareOp": "less_or_equal",
+        "cullMode": "none",
+        "depthClamp": true,
+        "depthBias": { "constant": 0.0, "slope": 1.5 }
+      },
+      "descriptorSets": [ "shadowSet", "vegetationDrawSet", "vegetationTextureSet" ],
+      "pushConstants": [ { "stages": [ "vertex" ], "size": 4,
+                           "bindings": [ { "name": "pass.repeatIndex", "type": "uint" } ] } ],
+      "outputs": [
+        { "resource": "sunShadowMap", "usage": "depth_write", "layer": "{cascade}" }
+      ]
+    },
+    {
       "name": "Terrain",
       "type": "graphics",
       "execution": {
@@ -901,7 +937,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 16, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 31, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/vegetation.vert.spv",

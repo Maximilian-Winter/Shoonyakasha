@@ -72,6 +72,7 @@ layout(set = 0, binding = 2) uniform TerrainParams {
     vec4 detail;
     vec4 climate;
     vec4 biomeView;
+    vec4 gullies;
     vec4 sites[8];
     vec4 siteShapes[8];
     vec4 lakes[32];
@@ -107,6 +108,7 @@ layout(std430, set = 0, binding = 4) writeonly buffer ProbeHeights {
 #include "craters.glsl"
 #include "lakes.glsl"
 #include "rivers.glsl"
+#include "geology.glsl"
 
 const int PLANET = 0;
 const int MOON = 1;
@@ -220,6 +222,19 @@ float horizonTowardsSun(vec3 d, float h, float radius, float near) {
     return highest;
 }
 
+// The scree's share (geology.glsl's screeShare) at unit direction `d` with
+// `normal`: the ground's rise over run from SCREE_NEAR to SCREE_FAR metres
+// uphill (against the normal's lean) on a body of `radius`.
+float screeAt(vec3 d, vec3 normal, float radius) {
+    vec3 lean = normal - d * dot(normal, d);
+    float s = length(lean);
+    if (s < 0.01) return 0.0;
+    vec3 uphill = -lean / s;
+    float near = bodyHeight(normalize(d + uphill * (SCREE_NEAR / radius)));
+    float far = bodyHeight(normalize(d + uphill * (SCREE_FAR / radius)));
+    return screeShare(1.0 - dot(normal, d), (far - near) / (SCREE_FAR - SCREE_NEAR));
+}
+
 // Writes vertex `k` of `slot`, at grid coordinates `ij`, `below` metres
 // under the terrain; returns the terrain's height there. Its horizon is
 // measured from the water's surface where a lake covers it (lakeAt), and
@@ -236,11 +251,13 @@ float writeVertex(uint slot, int k, ivec2 ij, int face, int x, int y, double cel
     double r = radius + double(h) - double(below);
     uint index = slot * uint(VERTICES) + uint(k);
     pool.vertices[index].positionU = vec4(vec3(d * r - centre), float(u));
-    pool.vertices[index].normalV = vec4(surfaceNormal(d, radius, step), float(v));
+    vec3 normal = surfaceNormal(d, radius, step);
+    pool.vertices[index].normalV = vec4(normal, float(v));
     pool.vertices[index].radialHeight = vec4(vec3(d), h);
     float spacing = float(radius * 2.0LF / cells);        // metres between vertices, near enough
     float near = min(max(HORIZON_NEAR, 2.0 * spacing), 0.2 * float(radius));
     vec3 climate = body == PLANET ? climateAt(vec3(d), h) : vec3(0.0);
+    if (body == PLANET && h > 0.0) climate.z = coverWithScree(climate.z, screeAt(vec3(d), normal, float(radius)));
     float depth;
     float surface = body == PLANET && lakeAt(vec3(d), depth) >= 0 ? h + depth : h;
     pool.vertices[index].horizon = vec4(horizonTowardsSun(vec3(d), surface, float(radius), near), climate);
