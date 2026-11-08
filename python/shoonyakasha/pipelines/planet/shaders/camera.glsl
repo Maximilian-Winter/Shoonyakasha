@@ -70,6 +70,13 @@ layout(set = CAMERA_SET, binding = 9) uniform sampler2D skyIrradianceLut;
 #define ATMOSPHERE_MULTI_SCATTERING_LUT
 #define ATMOSPHERE_SKY_IRRADIANCE_LUT
 
+// The sky probe (sky_probe.glsl, the SkyProbe, SkyProbeFilter and SkySh
+// passes) and the GGX split-sum table (brdf_lut.comp, from Python).
+layout(set = CAMERA_SET, binding = 10) uniform sampler2D skyProbe;
+layout(set = CAMERA_SET, binding = 11) uniform sampler2D skySh;
+layout(set = CAMERA_SET, binding = 12) uniform sampler2D brdfLut;
+#define SKY_PROBE_SAMPLERS
+
 // The sun's shadow cascades (shadows.py, shadow.glsl): the map, one layer
 // per cascade, and how to reach it.
 layout(set = CAMERA_SET, binding = 5) uniform sampler2DArrayShadow sunShadowMap;

@@ -1,0 +1,42 @@
+#version 450
+//
+// The sky probe's L2 spherical harmonics (sky_probe.glsl): each of nine
+// invocations sums its coefficient over every texel of the probe's light,
+// each texel weighted by the solid angle it covers on the octahedral map
+// (from the directions at its corners), the weights scaled to 4 pi in all.
+//
+
+layout(local_size_x = 16) in;
+
+#include "sky_probe.glsl"
+
+layout(set = 0, binding = 0) uniform sampler2D skyRadiance;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D skyShImage;
+
+// The solid angle of the texel at `texel`: the area of the quadrilateral of
+// its corners' directions, as two triangles.
+float texelSolidAngle(ivec2 texel) {
+    float s = float(SKY_PROBE_SIZE);
+    vec3 a = skyOctDecode(vec2(texel) / s), b = skyOctDecode((vec2(texel) + vec2(1.0, 0.0)) / s);
+    vec3 c = skyOctDecode((vec2(texel) + vec2(1.0)) / s), d = skyOctDecode((vec2(texel) + vec2(0.0, 1.0)) / s);
+    return 0.5 * (length(cross(b - a, c - a)) + length(cross(c - a, d - a)));
+}
+
+void main() {
+    int k = int(gl_LocalInvocationID.x);
+    if (k >= 9) return;
+    vec3 sum = vec3(0.0);
+    float total = 0.0;
+    for (int v = 0; v < SKY_PROBE_SIZE; ++v) {
+        for (int u = 0; u < SKY_PROBE_SIZE; ++u) {
+            ivec2 texel = ivec2(u, v);
+            vec3 d = skyOctDecode((vec2(texel) + 0.5) / float(SKY_PROBE_SIZE));
+            float w = texelSolidAngle(texel);
+            float y[9];
+            skyShBasis(d, y);
+            sum += texelFetch(skyRadiance, texel, 0).rgb * y[k] * w;
+            total += w;
+        }
+    }
+    imageStore(skyShImage, ivec2(k, 0), vec4(sum * (4.0 * 3.14159265358979 / total), 1.0));
+}

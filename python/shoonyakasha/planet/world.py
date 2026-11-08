@@ -82,7 +82,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import cube_sphere, ground_textures, orbits, scans, shadows, vegetation, vegetation_impostors, vegetation_textures
+from . import brdf_lut, cube_sphere, ground_textures, orbits, scans, shadows, vegetation, vegetation_impostors
+from . import vegetation_textures
 from . import rivers as river_tools
 from . import wind as wind_field
 from .rocks import TakenRocks
@@ -803,7 +804,9 @@ class PlanetWorld:
     def load_ground_textures(self):
         """Hand the ground's textures to the pipeline (ground_textures.py) and
         their mean albedos to GroundParams; without them the ground keeps its
-        procedural colours."""
+        procedural colours. Also hand it the GGX split-sum table (brdf_lut.py)."""
+        self.engine.set_pipeline_image_data("brdfLut", brdf_lut.rgba16(brdf_lut.table(self.engine.compute)),
+                                            format="R16G16B16A16_SFLOAT")
         means = ground_textures.load(self.engine)
         self.ground_textures = means is not None
         if means is None:

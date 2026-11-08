@@ -1,0 +1,65 @@
+#version 450
+//
+// The sky probe's levels (sky_probe.glsl): level 0 the probe's light as
+// sky_probe.comp wrote it; each further level, for a surface of roughness
+// level / (SKY_PROBE_LEVELS - 1) seen along its normal, that light
+// averaged over FILTER_SAMPLES directions drawn from the GGX lobe about the
+// texel's direction (Hammersley points), each weighted by its cosine to it.
+//
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "sky_probe.glsl"
+
+layout(set = 0, binding = 0) uniform sampler2D skyRadiance;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D skyProbeImage;
+
+const int FILTER_SAMPLES = 256;
+const float PI = 3.14159265358979;
+
+vec2 hammersley(uint i, uint n) {
+    uint bits = i;
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return vec2(float(i) / float(n), float(bits) * 2.3283064365386963e-10);
+}
+
+vec3 radianceToward(vec3 d) {
+    vec2 at = clamp(skyOctEncode(d) * float(SKY_PROBE_SIZE), vec2(0.5), vec2(float(SKY_PROBE_SIZE) - 0.5));
+    return textureLod(skyRadiance, at / float(SKY_PROBE_SIZE), 0.0).rgb;
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (texel.x >= SKY_PROBE_SIZE || texel.y >= SKY_PROBE_SIZE * SKY_PROBE_LEVELS) return;
+    int level = texel.y / SKY_PROBE_SIZE;
+    ivec2 own = ivec2(texel.x, texel.y - level * SKY_PROBE_SIZE);
+    if (level == 0) {
+        imageStore(skyProbeImage, texel, vec4(texelFetch(skyRadiance, own, 0).rgb, 1.0));
+        return;
+    }
+    vec3 n = skyOctDecode((vec2(own) + 0.5) / float(SKY_PROBE_SIZE));
+    float roughness = float(level) / float(SKY_PROBE_LEVELS - 1);
+    float a = roughness * roughness;
+    vec3 side = abs(n.y) < 0.999 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0);
+    vec3 t = normalize(cross(side, n));
+    vec3 b = cross(n, t);
+    vec3 sum = vec3(0.0);
+    float weight = 0.0;
+    for (int i = 0; i < FILTER_SAMPLES; ++i) {
+        vec2 xi = hammersley(uint(i), uint(FILTER_SAMPLES));
+        float phi = 2.0 * PI * xi.x;
+        float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
+        float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+        vec3 h = t * (sinTheta * cos(phi)) + b * (sinTheta * sin(phi)) + n * cosTheta;
+        vec3 l = 2.0 * dot(n, h) * h - n;
+        float cosL = dot(n, l);
+        if (cosL <= 0.0) continue;
+        sum += radianceToward(l) * cosL;
+        weight += cosL;
+    }
+    imageStore(skyProbeImage, texel, vec4(sum / max(weight, 1e-6), 1.0));
+}
