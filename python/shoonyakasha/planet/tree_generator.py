@@ -280,7 +280,7 @@ SPECIES = {
     "broadleaf_a": Species(             # a round crown
         "broadleaf_a",
         [Level(sections=4, segments=8, taper=0.6, gnarliness=0.06),
-         Level(children=6, start=0.42, angle=48.0, length=0.48, radius=0.5, shorten=0.3, taper=0.45,
+         Level(children=6, start=0.3, angle=48.0, length=0.48, radius=0.5, shorten=0.3, taper=0.45,
                gnarliness=0.18, sections=3, segments=5),
          Level(children=5, start=0.25, angle=40.0, length=0.5, radius=0.55, taper=0.4, gnarliness=0.25,
                sections=2, segments=3)],
@@ -289,7 +289,7 @@ SPECIES = {
     "broadleaf_b": Species(             # a tall oval crown
         "broadleaf_b",
         [Level(sections=4, segments=8, taper=0.5, gnarliness=0.05),
-         Level(children=7, start=0.38, angle=30.0, length=0.45, radius=0.5, shorten=0.5, taper=0.45,
+         Level(children=7, start=0.28, angle=30.0, length=0.45, radius=0.5, shorten=0.5, taper=0.45,
                gnarliness=0.15, sections=3, segments=5),
          Level(children=4, start=0.25, angle=35.0, length=0.45, radius=0.55, taper=0.4, gnarliness=0.25,
                sections=2, segments=3)],
