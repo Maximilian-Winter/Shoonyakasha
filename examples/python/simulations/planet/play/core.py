@@ -56,7 +56,14 @@ parser.add_argument("--check", action="store_true",
                          "on a lake and a river, run it dry and call fuel, fly it in space mode and land it on the "
                          "moon, then night, then quit to the main menu and start a new game; report and exit")
 parser.add_argument("--shot", metavar="FILE", help="with --check: a screenshot after SHOT_SECONDS of walking")
+parser.add_argument("--debug", action="store_true",
+                    help="the Slate's Debug app: teleports, events, refills and the meteor aim")
+parser.add_argument("--debug-check", action="store_true",
+                    help="run the debug tools through (teleports, the meteor aim, a storm, the hour, a refill, low "
+                         "orbit), report and exit")
 args = parser.parse_args()
+if args.debug_check:
+    args.check = args.debug = True
 settings = config.Config(CONFIG_PATH) if args.check else config.load(CONFIG_PATH)
 save_base = CHECK_SAVE_BASE if args.check else SAVE_BASE
 planet_world.compile_shaders()

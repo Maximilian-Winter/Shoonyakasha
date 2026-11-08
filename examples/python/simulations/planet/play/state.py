@@ -180,6 +180,7 @@ class UI:
     car_glows: object = None           # the car's engines' glow (carview.EngineGlows)
     meteor_glows: object = None        # the meteors', plumes' and hot props' quads (viewmodel.Glows)
     rain_glows: object = None          # the rain's streaks (viewmodel.Glows)
+    aim_glows: object = None           # the debug meteor aim's marker (viewmodel.Glows), with --debug
 
 
 @dataclass
@@ -230,6 +231,15 @@ class Session:
 
 
 @dataclass
+class Debug:
+    aim: bool = False                  # the meteor aim on (play.debugging)
+    size: str = "Meteorite"            # what the aim calls: one of debugging.SIZES
+    clicked: bool = False              # the left button down last frame
+    poi: int = 0                       # the next point of interest's turn
+    note: str = ""                     # what the debug tools did last
+
+
+@dataclass
 class State:
     view: View = field(default_factory=View)
     site: Site = field(default_factory=Site)
@@ -245,4 +255,5 @@ class State:
     ui: UI = field(default_factory=UI)
     sound: Sound = field(default_factory=Sound)
     session: Session = field(default_factory=Session)
+    debug: Debug = field(default_factory=Debug)
 

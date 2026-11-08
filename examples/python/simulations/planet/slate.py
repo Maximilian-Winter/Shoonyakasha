@@ -418,8 +418,17 @@ def _system(mesh, x, y, c):
                      c, 1.4)
 
 
+def _debug(mesh, x, y, c):
+    fs.dot(mesh, x, y + 1.0, 5.0, c, hollow=True, width=1.4)
+    for side in (-1.0, 1.0):
+        for k, dy in enumerate((-3.0, 1.0, 5.0)):
+            mesh.segment((x + side * 4.5, y + dy), (x + side * 9.0, y + dy - 2.0 + 2.0 * k), c, 1.2)
+    mesh.segment((x - 2.0, y - 4.0), (x - 4.0, y - 8.0), c, 1.2)
+    mesh.segment((x + 2.0, y - 4.0), (x + 4.0, y - 8.0), c, 1.2)
+
+
 ICONS = {"overview": _overview, "market": _market, "map": _map, "contracts": _contracts, "workshop": _workshop,
-         "vehicle": _vehicle, "log": _log, "system": _system}
+         "vehicle": _vehicle, "log": _log, "system": _system, "debug": _debug}
 
 
 # ── The System screen ──────────────────────────────────────────────────────

@@ -163,8 +163,9 @@ def set_max_levels():
 
 def place_viewmodel(dt, camera):
     viewmodel, gun, player = state.ui.viewmodel, foot.gun, foot.player
-    viewmodel.show(player is not None)
-    if player is None:
+    shown = player is not None and not (state.debug.aim and not state.vehicle.driving)
+    viewmodel.show(shown)
+    if not shown:
         return
     held = None
     if gun.held is not None:
