@@ -34,7 +34,10 @@ across. `Built.to_frame` turns
 the site frame's points (x east, y up, z north) into the planet's axes,
 and `Built.point` a site point into planet space. `Outpost.at(ship_position)` tells whether a point is over
 its pad: within PAD_REACH of its centre along the ground and REACH_UP
-above or below it. The outpost named REFINERY has a refinery
+above or below it. `Pads.register_probes(world)` hands each built
+outpost's static triangles and frame to world.add_site_probes, and
+`base_probes(world, pieces, frame)` the home outpost's blocks (each piece's
+centre east, up and north of the site's point on the ground and its size). The outpost named REFINERY has a refinery
 (`Outpost.refinery`): it turns ice into fuel, REFINE_ICE kg of ice to a
 kg of fuel (the walker's Outpost tab).
 """
@@ -46,7 +49,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 
-from shoonyakasha.planet import outpost_kit, outpost_layout
+from shoonyakasha.planet import outpost_kit, outpost_layout, site_probes
 from shoonyakasha.planet.resources import AMBER, CUPRITE, EVAPORITE, FERRITE, ICE, ILMENITE, QUARTZ
 from shoonyakasha.planet.rocks import ORE_TINTS
 from shoonyakasha.planet.vec import add, dot, length, local_frame, normalize, scale, sub
@@ -242,6 +245,14 @@ class Pads:
             self.make_entities(built)
             self.built.append(built)
 
+    def register_probes(self, world):
+        """Each built outpost's static triangles and frame to world.add_site_probes."""
+        for built in self.built:
+            triangles = np.asarray(built.model.solid[0], np.float32).reshape(-1, 3, 3)
+            world.add_site_probes(("outpost", built.outpost.name), triangles,
+                                  lambda b=built: (b.point((0.0, 0.0, 0.0)), tuple(b.axes[0]), tuple(b.axes[1]),
+                                                   tuple(b.axes[2])))
+
     def make_entities(self, built):
         from viewmodel import white_texture
         scene = self.engine.scene
@@ -319,3 +330,10 @@ class Pads:
 def nearest(outposts, position):
     """The outpost nearest `position` (from the planet's centre), or None."""
     return min(outposts, key=lambda o: length(sub(o.point(), position)), default=None)
+
+
+def base_probes(world, pieces, frame):
+    """The home outpost's blocks (((east, up, north) of their centres, size) each) to world.add_site_probes,
+    with `frame` giving its point on the ground and east, up, north."""
+    triangles = np.concatenate([site_probes.box_triangles((e, u, n), size) for (e, u, n), size in pieces])
+    world.add_site_probes(("base",), triangles, frame)

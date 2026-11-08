@@ -12,7 +12,7 @@ from shoonyakasha.planet import rivers
 from shoonyakasha.planet.lakes import LakeSurvey
 from shoonyakasha.planet.world import SITE_BLEND_RADIUS
 
-from outposts import Survey
+from outposts import Survey, base_probes
 from play.core import HERE, RIVER_CHECK_WIDTH, SHIP_CLEARANCE, blocks, bodies, box, engine, pads, planet, state, world
 from play import economy, spaceflight, vehicle, walking
 
@@ -45,6 +45,8 @@ def build_site():
         engine.scene.set_material_float(entity, "gridStrength", 0.0)
         engine.scene.set_render_layer_mask(entity, 1)
         blocks.append((entity, add(scale(east, e), add(scale(up, u), scale(north, n)))))
+    base_probes(world, [(centre, size) for centre, size, _ in pieces],
+                lambda: (world.site_ground(), world.site_frame()[2], world.site_frame()[1], world.site_frame()[3]))
 
 
 def begin_survey():
@@ -89,6 +91,7 @@ def update_outposts():
     world.request_height_grid(frame)
     state.site.survey = ("rivers", frame, avoid)
     pads.build(state.site.outposts, tuple(planet.terrain["seed"]))
+    pads.register_probes(world)
 
 
 def update_rivers():

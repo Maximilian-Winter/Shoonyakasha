@@ -13,7 +13,8 @@
 // biomes' flat colours (biomeViewColour) instead. Otherwise it takes the
 // chunk's colour, with face lines (shading.glsl). The planet is lit by the
 // sunlight that comes through the atmosphere and a sky light
-// (atmosphere.glsl), the moon by the sunlight alone, both also by the
+// (atmosphere.glsl), the sky light times the share of the sky it sees at
+// the nearest site (site_probes.glsl), the moon by the sunlight alone, both also by the
 // local lights (lights.glsl), in HDR.
 //
 
@@ -28,6 +29,7 @@
 #include "biome.glsl"
 #include "lakes.glsl"
 #include "rivers.glsl"
+#include "site_probes.glsl"
 #define GROUND_SET 2
 #include "ground.glsl"
 
@@ -99,6 +101,7 @@ void main() {
                         + localLights(albedo, fragRelativePos, shaded, false), 1.0);
         return;
     }
-    outColor = vec4(lightSurface(albedo, p, shaded, radial, terrainShadow * cloudShadow(p))
+    outColor = vec4(lightSurfaceSeeing(albedo, p, shaded, radial, terrainShadow * cloudShadow(p),
+                                       siteSkyShare(fragRelativePos, shaded))
                     + localLights(albedo, fragRelativePos, shaded, false), 1.0);
 }

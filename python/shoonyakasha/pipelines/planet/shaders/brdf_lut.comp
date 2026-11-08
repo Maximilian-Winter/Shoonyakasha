@@ -1,0 +1,63 @@
+#version 450
+//
+// The split-sum table of the GGX specular reflection (Karis 2013), run once
+// by shoonyakasha.planet.brdf_lut: per texel, a cosine between the view and
+// the normal (u, (x + 0.5) / size) and a roughness (v, (y + 0.5) / size),
+// the scale A and bias B of the Fresnel reflectance at normal incidence
+// (F0) that the GGX lobe's reflection averages to: F0 * A + B. Each is the
+// mean over SAMPLES half vectors drawn from the lobe (Hammersley points) of
+// the Smith height-correlated visibility (k = roughness^2 / 2) and
+// Schlick's Fresnel weights.
+//
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(std430, set = 0, binding = 0) writeonly buffer Table { vec2 ab[]; } table;
+
+layout(push_constant) uniform Push {
+    uint size;
+} push;
+
+const int SAMPLES = 1024;
+const float PI = 3.14159265358979;
+
+vec2 hammersley(uint i, uint n) {
+    uint bits = i;
+    bits = (bits << 16u) | (bits >> 16u);
+    bits = ((bits & 0x55555555u) << 1u) | ((bits & 0xAAAAAAAAu) >> 1u);
+    bits = ((bits & 0x33333333u) << 2u) | ((bits & 0xCCCCCCCCu) >> 2u);
+    bits = ((bits & 0x0F0F0F0Fu) << 4u) | ((bits & 0xF0F0F0F0u) >> 4u);
+    bits = ((bits & 0x00FF00FFu) << 8u) | ((bits & 0xFF00FF00u) >> 8u);
+    return vec2(float(i) / float(n), float(bits) * 2.3283064365386963e-10);
+}
+
+float smithG1(float c, float k) {
+    return c / (c * (1.0 - k) + k);
+}
+
+void main() {
+    uvec2 texel = gl_GlobalInvocationID.xy;
+    if (texel.x >= push.size || texel.y >= push.size) return;
+    float cosV = (float(texel.x) + 0.5) / float(push.size);
+    float roughness = (float(texel.y) + 0.5) / float(push.size);
+    float a = roughness * roughness;
+    float k = a / 2.0;
+    vec3 v = vec3(sqrt(1.0 - cosV * cosV), 0.0, cosV);
+    float sumA = 0.0, sumB = 0.0;
+    for (int i = 0; i < SAMPLES; ++i) {
+        vec2 xi = hammersley(uint(i), uint(SAMPLES));
+        float phi = 2.0 * PI * xi.x;
+        float cosTheta = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
+        float sinTheta = sqrt(max(1.0 - cosTheta * cosTheta, 0.0));
+        vec3 h = vec3(sinTheta * cos(phi), sinTheta * sin(phi), cosTheta);
+        vec3 l = 2.0 * dot(v, h) * h - v;
+        float cosL = l.z, cosH = h.z, vh = max(dot(v, h), 0.0);
+        if (cosL <= 0.0) continue;
+        float g = smithG1(cosV, k) * smithG1(cosL, k);
+        float visible = g * vh / (cosH * cosV);
+        float fresnel = pow(1.0 - vh, 5.0);
+        sumA += (1.0 - fresnel) * visible;
+        sumB += fresnel * visible;
+    }
+    table.ab[texel.y * push.size + texel.x] = vec2(sumA, sumB) / float(SAMPLES);
+}
