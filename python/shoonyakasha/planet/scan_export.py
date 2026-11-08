@@ -1,5 +1,5 @@
 """
-Prepares the scans of scans.SCANS with Blender, once:
+Prepares the scans of scans.ALL with Blender, once:
 
     python -m shoonyakasha.planet.scan_export            # the kinds not yet prepared
     python -m shoonyakasha.planet.scan_export --all      # every kind again
@@ -96,7 +96,7 @@ def write_credits():
     lines = ["# Scans", "",
              "CC0 models from Poly Haven (polyhaven.com), prepared from its scenes by "
              "shoonyakasha.planet.scan_export.", ""]
-    for kind in scans.SCANS:
+    for kind in scans.ALL:
         meta = os.path.join(scans.prepared_directory(kind.name), "meta.json")
         if os.path.exists(meta):
             lines.append("- `%s`: %s, object `%s`" % (kind.name, scans.SCENES[kind.scene][1], kind.object))
@@ -109,7 +109,7 @@ def check():
     lines, ok = [], True
     credits_path = os.path.join(scans.directory(), "prepared", "CREDITS.md")
     credits = open(credits_path, encoding="utf-8").read() if os.path.exists(credits_path) else ""
-    for kind in scans.SCANS:
+    for kind in scans.ALL:
         scan = scans.prepared(kind)
         if scan is None:
             lines.append("%s: not prepared" % kind.name)
@@ -140,7 +140,7 @@ def main():
         print("\n".join(lines))
         print("scans: %s" % ("passed" if ok else "FAILED"))
         raise SystemExit(0 if ok else 1)
-    kinds = [k for k in scans.SCANS if args.all or scans.prepared(k) is None]
+    kinds = [k for k in scans.ALL if args.all or scans.prepared(k) is None]
     if kinds:
         export(kinds)
     print("scans prepared in %s" % os.path.join(scans.directory(), "prepared"))

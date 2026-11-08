@@ -233,6 +233,8 @@
           "default": [ 0.0, 0.0, 0.0, 0.0 ] },
         { "name": "scans", "type": "vec4", "source": "scene.custom.planet.vegetation.scans",
           "default": [ 0.0, 1200.0, 1.0, 1.0 ] },
+        { "name": "wind", "type": "vec4", "source": "scene.custom.planet.vegetation.wind",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
         { "name": "clearings", "type": "vec4", "arrayCount": 32,
           "source": "scene.custom.planet.vegetation.clearings[i]" },
         { "name": "clearingShapes", "type": "vec4", "arrayCount": 32,
@@ -251,7 +253,7 @@
     "VegetationMesh": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 65536,
+      "elementCount": 131072,
       "fields": [
         { "name": "position", "type": "vec4" },
         { "name": "normal", "type": "vec4" },
@@ -261,20 +263,20 @@
     "VegetationIndices": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 196608,
+      "elementCount": 393216,
       "fields": [ { "name": "index", "type": "uint" } ]
     },
     "VegetationInstances": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 2097152,
+      "elementCount": 2228224,
       "fields": [ { "name": "data", "type": "vec4" } ],
       "memory": { "location": "device_local" }
     },
     "VegetationDraws": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 160,
+      "elementCount": 352,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
     "RiverData": {
@@ -852,7 +854,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 15, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 17, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/shadow_vegetation.vert.spv",
@@ -880,7 +882,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 320, "drawCount": 15, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 360, "drawCount": 51, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/shadow_vegetation.vert.spv",
@@ -937,7 +939,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 31, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 69, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/vegetation.vert.spv",

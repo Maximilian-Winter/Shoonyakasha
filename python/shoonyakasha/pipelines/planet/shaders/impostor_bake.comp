@@ -1,0 +1,125 @@
+#version 450
+//
+// Bakes one tree's block of the octahedral impostors' atlas
+// (impostor_oct.glsl; shoonyakasha.planet.vegetation_impostors): one
+// invocation per texel of the block, BAKE_SAMPLES x BAKE_SAMPLES rays
+// along the texel's view through it, each finding the nearest triangle of
+// the tree's mesh (vegetation's vertex layout) it hits, a card's or
+// grass's only where the foliage atlas's alpha there is 1/2 or more. Each
+// texel gets its hits' colour (the card's atlas colour or the bark's,
+// linear, times the shade) averaged and the share of rays that hit
+// (albedo), and their normals averaged in the tree's frame with 1 where
+// most hits were foliage, else 0 (normals).
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "impostor_oct.glsl"
+
+layout(std430, set = 0, binding = 0) readonly buffer Vertices { vec4 v[]; } mesh;    // three vec4 per vertex
+layout(std430, set = 0, binding = 1) readonly buffer Indices { uint i[]; } indices;
+layout(set = 0, binding = 2) uniform sampler2D atlas;     // the foliage atlas, sRGB bytes
+layout(set = 0, binding = 3) uniform sampler2D bark;      // the bark tile, sRGB bytes
+layout(std430, set = 0, binding = 4) writeonly buffer Albedo { vec4 texels[]; } albedo;
+layout(std430, set = 0, binding = 5) writeonly buffer Normals { vec4 texels[]; } normals;
+
+layout(push_constant) uniform Push {
+    uint firstIndex;
+    uint indexCount;
+    float centreY;           // the bounding sphere's centre's height
+    float radius;            // and its radius
+} tree;
+
+const int BAKE_SAMPLES = 2;
+const int PART_BARK = 0;
+const int PART_CARD = 1;
+const int PART_GRASS = 2;
+
+vec3 srgbToLinear(vec3 c) {
+    return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
+void vertexOf(uint k, out vec3 position, out vec3 normal, out vec2 uv, out int part, out float shade) {
+    vec4 a = mesh.v[k * 3u], b = mesh.v[k * 3u + 1u], c = mesh.v[k * 3u + 2u];
+    position = a.xyz;
+    normal = b.xyz;
+    uv = vec2(a.w, c.w);
+    part = int(b.w + 0.5);
+    shade = c.r;
+}
+
+void main() {
+    int size = OCT_VIEWS * OCT_TEXELS;
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (texel.x >= size || texel.y >= size) return;
+    ivec2 view = texel / OCT_TEXELS;
+    vec3 d = octDirection(view);
+    vec3 right, up;
+    octBasis(d, right, up);
+    vec3 centre = vec3(0.0, tree.centreY, 0.0);
+    vec3 colour = vec3(0.0), normal = vec3(0.0);
+    float hits = 0.0, foliage = 0.0;
+    for (int sy = 0; sy < BAKE_SAMPLES; ++sy) {
+        for (int sx = 0; sx < BAKE_SAMPLES; ++sx) {
+            vec2 within = (vec2(texel % OCT_TEXELS) + (vec2(sx, sy) + 0.5) / float(BAKE_SAMPLES)) / float(OCT_TEXELS);
+            vec2 xy = vec2(within.x * 2.0 - 1.0, 1.0 - within.y * 2.0);
+            vec3 origin = centre + (right * xy.x + up * xy.y) * tree.radius + d * (2.0 * tree.radius);
+            vec3 ray = -d;
+            float best = 1e30;
+            vec3 hitColour = vec3(0.0), hitNormal = vec3(0.0);
+            bool hitFoliage = false;
+            for (uint t = 0u; t < tree.indexCount; t += 3u) {
+                uint ia = indices.i[tree.firstIndex + t], ib = indices.i[tree.firstIndex + t + 1u];
+                uint ic = indices.i[tree.firstIndex + t + 2u];
+                vec3 pa = mesh.v[ia * 3u].xyz, pb = mesh.v[ib * 3u].xyz, pc = mesh.v[ic * 3u].xyz;
+                vec3 e1 = pb - pa, e2 = pc - pa;
+                vec3 h = cross(ray, e2);
+                float det = dot(e1, h);
+                if (abs(det) < 1e-12) continue;
+                float inv = 1.0 / det;
+                vec3 s = origin - pa;
+                float u = dot(s, h) * inv;
+                if (u < 0.0 || u > 1.0) continue;
+                vec3 q = cross(s, e1);
+                float v = dot(ray, q) * inv;
+                if (v < 0.0 || u + v > 1.0) continue;
+                float dist = dot(e2, q) * inv;
+                if (dist <= 0.0 || dist >= best) continue;
+                vec3 p0, n0, p1, n1, p2, n2;
+                vec2 uv0, uv1, uv2;
+                int part0, part1, part2;
+                float s0, s1, s2;
+                vertexOf(ia, p0, n0, uv0, part0, s0);
+                vertexOf(ib, p1, n1, uv1, part1, s1);
+                vertexOf(ic, p2, n2, uv2, part2, s2);
+                float w = 1.0 - u - v;
+                vec2 uv = uv0 * w + uv1 * u + uv2 * v;
+                float shade = s0 * w + s1 * u + s2 * v;
+                vec3 c;
+                bool card = part0 == PART_CARD || part0 == PART_GRASS;
+                if (card) {
+                    vec4 texel = textureLod(atlas, uv, 0.0);
+                    if (texel.a < 0.5) continue;
+                    c = srgbToLinear(texel.rgb);
+                } else {
+                    c = srgbToLinear(textureLod(bark, fract(uv), 0.0).rgb);
+                }
+                best = dist;
+                hitColour = c * shade;
+                hitNormal = normalize(n0 * w + n1 * u + n2 * v);
+                hitFoliage = card;
+            }
+            if (best < 1e30) {
+                hits += 1.0;
+                colour += hitColour;
+                normal += hitNormal;
+                foliage += hitFoliage ? 1.0 : 0.0;
+            }
+        }
+    }
+    uint at = uint(texel.y * size + texel.x);
+    float samples = float(BAKE_SAMPLES * BAKE_SAMPLES);
+    albedo.texels[at] = hits > 0.0 ? vec4(colour / hits, hits / samples) : vec4(0.0);
+    normals.texels[at] = hits > 0.0 ? vec4(length(normal) > 0.0 ? normalize(normal) : vec3(0.0, 1.0, 0.0),
+                                           foliage * 2.0 >= hits ? 1.0 : 0.0)
+                                    : vec4(0.0, 1.0, 0.0, 1.0);
+}

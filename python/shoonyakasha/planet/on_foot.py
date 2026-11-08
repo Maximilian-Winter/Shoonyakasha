@@ -286,6 +286,8 @@ class OnFoot:
             if self.rocks is not None:
                 self.rocks.clear(bubble)
             self._plants = plants
+        if getattr(world, "tree_seed", None) is not None:
+            self.nearby_trees.trunks = world.trunks()
         trees = self.nearby_trees.read()
         if trees is not None:
             if bubble.body is world.planet:

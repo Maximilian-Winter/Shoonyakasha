@@ -145,6 +145,7 @@ GRASS_RANGE = 150.0
 ROCK_CELLS = 65536
 ROCK_RANGE = 150.0
 SCAN_RANGE = 1_200.0             # m the scans are drawn within (vegetation_scatter.comp's scans' grid)
+TREE_WIND_HEIGHT = 10.0          # m above the ground the trees' wind is taken at
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -622,6 +623,7 @@ class PlanetWorld:
         self.scans_prepared = False        # whether every scan kind was prepared (scans.available)
         self.taken_rocks = TakenRocks(engine)   # the cells whose rocks the scatter leaves out
         self.vegetation_draws = None       # the kinds' draws with no instances, set again each frame
+        self.tree_seed = None              # the seed the trees were grown from (upload_vegetation_meshes)
         self.vegetation_scans = False      # whether the vegetation's textures came from the downloaded scans
         self.temperature_offset = 0.0      # degrees C added to the climate's temperature
         self.moisture_offset = 0.0         # added to the climate's moisture
@@ -821,12 +823,17 @@ class PlanetWorld:
 
     def upload_vegetation_meshes(self):
         """The vegetation's textures (vegetation_textures: the foliage atlas
-        and the bark), the trees' impostors baked from their meshes and those
-        (vegetation_impostors), the scans' atlases (scans.atlas), the meshes
+        and the bark), the trees grown from the planet's seed
+        (vegetation.forest), their octahedral impostors baked from their
+        meshes on the engine's device (vegetation_impostors.cached_bake) and
+        those, the scans' atlases (scans.atlas), the meshes
         (vegetation.py, with the prepared scans) and the draws' template."""
         engine = self.engine
+        seed = tuple(self.planet.terrain["seed"][:3])
+        self.tree_seed = seed
         atlas, bark = vegetation_textures.atlas(), vegetation_textures.bark()
-        albedo, normals, rects = vegetation_impostors.bake(vegetation.trees(), atlas, bark)
+        albedo, normals, rects, _ = vegetation_impostors.cached_bake(vegetation.trees(seed), atlas, bark,
+                                                                     engine.compute)
         engine.set_pipeline_image_data("vegetationAtlas", atlas, format="R8G8B8A8_SRGB", mipmaps=True)
         engine.set_pipeline_image_data("vegetationBark", bark, format="R8G8B8A8_SRGB", mipmaps=True)
         engine.set_pipeline_image_data("vegetationImpostor", albedo, format="R8G8B8A8_SRGB", mipmaps=True)
@@ -837,7 +844,7 @@ class PlanetWorld:
         engine.set_pipeline_image_data("scanNormal", scan_normals, format="R8G8B8A8_UNORM", mipmaps=True)
         self.scan_grid = (columns, rows)
         self.scans_prepared = scans.available()
-        vertices, indices, ranges = vegetation.meshes(rects, cells)
+        vertices, indices, ranges = vegetation.meshes(rects, cells, seed)
         self.engine.set_buffer("VegetationMesh", vertices)
         self.engine.set_buffer("VegetationIndices", indices)
         self.vegetation_draws = vegetation.draw_template(ranges,
@@ -846,8 +853,9 @@ class PlanetWorld:
     def upload_vegetation(self):
         """This frame's vegetation settings, and its draws with no instances,
         which VegetationScatter fills; the rocks' settings with the count of
-        `taken_rocks` (its table sent when it changed), and the moon's
-        centre relative to the camera."""
+        `taken_rocks` (its table sent when it changed), the moon's centre
+        relative to the camera, and the wind (wind_at) TREE_WIND_HEIGHT above
+        the ground under the camera."""
         engine = self.engine
         engine.set_custom_vec4("planet.vegetation.settings",
                                (1.0 if self.vegetation else 0.0, self.vegetation_range, float(VEGETATION_CELLS),
@@ -867,6 +875,8 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.vegetation.moon", tuple(relative) + (0.0,))
         engine.set_custom_vec4("planet.vegetation.scans", (1.0 if self.scans and self.vegetation else 0.0, SCAN_RANGE,
                                                            float(self.scan_grid[0]), float(self.scan_grid[1])))
+        wind = self.wind_at(self.planet, self.planet.relative(self.position), TREE_WIND_HEIGHT)
+        engine.set_custom_vec4("planet.vegetation.wind", tuple(wind) + (length(wind),))
         if self.vegetation_draws is not None:
             engine.set_buffer("VegetationDraws", self.vegetation_draws)
 
@@ -1305,7 +1315,8 @@ class PlanetWorld:
         """Apply changed terrain parameters: every chunk is released, the
         site's height is measured again, the planet's flat sites, its lakes
         and its rivers are dropped, the planet is built again, and its taken
-        rocks are put back. A survey under way starts again."""
+        rocks are put back; with a new seed its trees are grown again
+        (upload_vegetation_meshes, once they were uploaded). A survey under way starts again."""
         self.lod.drop_tree(self.planet.index)
         self.taken_rocks.clear_body(self.planet.index)
         self.regenerations += 1
@@ -1325,6 +1336,12 @@ class PlanetWorld:
         self.patch = None
         self.terrain_version += 1
         self.upload_terrain()
+        if self.tree_seed is not None and tuple(self.planet.terrain["seed"][:3]) != self.tree_seed:
+            self.upload_vegetation_meshes()
+
+    def trunks(self):
+        """Each tree kind's trunk (vegetation.Forest.trunks) as grown from the planet's seed."""
+        return vegetation.forest(self.tree_seed).trunks
 
     def change_terrain(self, name, index, factor):
         """One terrain parameter times `factor`, and the planet built again."""
