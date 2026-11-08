@@ -19,9 +19,15 @@ else the conifer cards drawn here.
 
 `atlas()` bakes the foliage atlas: CARDS cells of CELL x CELL texels in a
 row-major grid ATLAS_COLUMNS wide, RGBA in sRGB, each card's opaque texels
-scaled so their mean is CARD_MEAN (linear) in each channel, which the
-shader multiplies by the plant's colour; transparent texels take the
-card's mean colour, so its mip levels do not darken at the edges.
+scaled so their mean is CARD_MEAN (linear) in each channel, then turned
+towards their grey (luminance) to keep CARD_CHROMA of their colour, which
+the shader multiplies by the plant's colour; transparent texels take the
+card's mean colour, so its mip levels do not darken at the edges. Each
+leaf and sprig is drawn LEAF_SHADE_SPREAD lighter or darker than the
+next (at most half that either way) and casts a soft shadow onto the
+leaves already drawn under it: their colour darkened by LEAF_SHADOW
+where its outline, blurred by LEAF_SHADOW_BLUR and moved LEAF_SHADOW_SHIFT
+down and right (both of the card's size), covers them.
 `card_rect(name)` gives a card's (u0, v0, u1, v1) in the atlas, v down.
 `bark()` gives the bark tile, RGBA in sRGB. Both use the scans when all
 are downloaded (`available()`), else what is drawn here; baking needs
@@ -58,11 +64,12 @@ DIRECTORY = _directory()
 ASSETS = [("leaf", "LeafSet024"), ("needles", "LeafSet019"), ("sprig", "LeafSet002"), ("blade", "Foliage005"),
           ("bark", "Bark001")]
 
-CELL = 256
+CELL = 512
 ATLAS_COLUMNS = 4
 CARDS = ("broadleaf_a", "broadleaf_b", "conifer_a", "conifer_b", "bush", "acacia", "shrub", "grass", "fir_a", "fir_b")
 FIR_CARDS = {"fir_a": ("fir_twig_main", "conifer_a"), "fir_b": ("fir_twig_tip", "conifer_b")}   # (twig, fallback)
 CARD_MEAN = 0.5
+CARD_CHROMA = 0.3       # of a card's colour (after its channels are scaled to CARD_MEAN) kept, its grey all
 BARK_SIZE = 512
 
 
@@ -222,25 +229,48 @@ def elements(element, rng, scanned=None):
 
 # ── Cards ────────────────────────────────────────────────────────────────
 
-def _place(card, element, base, length, angle, flip=False):
+LEAF_SHADE_SPREAD = 0.4     # a leaf's or sprig's brightness: 1 plus up to half this either way
+LEAF_SHADOW = 0.45          # of the colour under a leaf's shadow, taken away
+LEAF_SHADOW_BLUR = 0.012    # of the card's size, the shadow's blur radius
+LEAF_SHADOW_SHIFT = (0.008, 0.014)   # of the card's size, the shadow's offset (right, down)
+
+
+def _place(card, element, base, length, angle, flip=False, shade=1.0, shadow=False):
     """`element` scaled to `length` texels long, its bottom at `base`, turned
-    `angle` degrees from straight up (positive clockwise), composited onto `card`."""
-    from PIL import Image
+    `angle` degrees from straight up (positive clockwise), its colour times
+    `shade`, composited onto `card`; with `shadow`, its blurred outline
+    first darkens what `card` already holds under it."""
+    from PIL import Image, ImageFilter
     if flip:
         element = element.transpose(Image.FLIP_LEFT_RIGHT)
     scale = length / max(element.size[1], 1)
     size = (max(int(element.size[0] * scale), 1), max(int(length), 1))
     piece = element.resize(size, Image.BICUBIC)
+    if shade != 1.0:
+        rgba = np.asarray(piece).astype(np.float64)
+        rgba[..., :3] = np.clip(rgba[..., :3] * shade, 0.0, 255.0)
+        piece = Image.fromarray(rgba.astype(np.uint8), "RGBA")
     # Pad so the base sits at the centre, then turn about the centre.
     padded = Image.new("RGBA", (size[0] + 2 * size[1], 2 * size[1]), (0, 0, 0, 0))
     padded.paste(piece, (size[1], 0))
     turned = padded.rotate(-angle, resample=Image.BICUBIC)
-    card.alpha_composite(turned, (int(base[0] - turned.size[0] / 2), int(base[1] - turned.size[1] / 2)))
+    at = (int(base[0] - turned.size[0] / 2), int(base[1] - turned.size[1] / 2))
+    if shadow:
+        c = card.size[0]
+        outline = turned.getchannel("A").filter(ImageFilter.GaussianBlur(LEAF_SHADOW_BLUR * c))
+        cover = Image.new("L", card.size, 0)
+        cover.paste(outline, (at[0] + int(LEAF_SHADOW_SHIFT[0] * c), at[1] + int(LEAF_SHADOW_SHIFT[1] * c)))
+        under = np.asarray(card).astype(np.float64)
+        under[..., :3] *= 1.0 - LEAF_SHADOW * np.asarray(cover).astype(np.float64)[..., None] / 255.0
+        card.paste(Image.fromarray(np.clip(under + 0.5, 0, 255).astype(np.uint8), "RGBA"))
+    card.alpha_composite(turned, at)
 
 
 def _stem(card, points, width):
+    """A stem through `points`, `width` texels wide on a card of 256 (as wide for its size on another)."""
     from PIL import ImageDraw
-    ImageDraw.Draw(card).line(points, fill=(255, 255, 255, 255), width=width, joint="curve")
+    ImageDraw.Draw(card).line(points, fill=(255, 255, 255, 255), width=max(1, round(width * card.size[0] / 256)),
+                              joint="curve")
 
 
 def twig_card(scan, size=CELL):
@@ -308,6 +338,7 @@ def _card(name, parts, rng):
     stems = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
     c = CELL
     pick = lambda kind: parts[kind][int(rng.integers(len(parts[kind])))]
+    leaf_shade = lambda: 1.0 + LEAF_SHADE_SPREAD * (rng.random() - 0.5)
     if name.startswith("broadleaf"):
         twigs = 5 if name.endswith("a") else 4
         for k in range(twigs):
@@ -323,7 +354,7 @@ def _card(name, parts, rng):
                 x, y = c * 0.5 + reach * t * math.sin(a) * (0.6 + 0.4 * t), c * 0.99 - reach * t * math.cos(a)
                 side = 1 if j % 2 else -1
                 _place(card, pick("leaf"), (x, y), c * rng.uniform(0.16, 0.24), spread + side * rng.uniform(30, 65),
-                       rng.random() < 0.5)
+                       rng.random() < 0.5, leaf_shade(), True)
     elif name.startswith("conifer"):
         _stem(stems, [(c * 0.5, c * 0.99), (c * 0.5, c * 0.04)], 5)
         count = 7 if name.endswith("a") else 9
@@ -339,14 +370,16 @@ def _card(name, parts, rng):
             angle = rng.uniform(-150, 150)
             r = math.sqrt(rng.random()) * 0.2
             base = (c * (0.5 + r * math.sin(math.radians(angle))), c * (0.55 - r * math.cos(math.radians(angle))))
-            _place(card, pick("sprig"), base, c * rng.uniform(0.18, 0.26), angle, rng.random() < 0.5)
+            _place(card, pick("sprig"), base, c * rng.uniform(0.18, 0.26), angle, rng.random() < 0.5,
+                   leaf_shade(), True)
     elif name == "acacia":
         for k in range(5):
             x0 = c * (0.15 + 0.7 * k / 4)
             _stem(stems, [(c * 0.5, c * 0.99), (x0, c * 0.55)], 3)
         for k in range(60):
             x, y = c * rng.uniform(0.06, 0.94), c * (0.5 - 0.22 * rng.random() ** 2)
-            _place(card, pick("sprig"), (x, y), c * rng.uniform(0.12, 0.2), rng.uniform(-110, 110), rng.random() < 0.5)
+            _place(card, pick("sprig"), (x, y), c * rng.uniform(0.12, 0.2), rng.uniform(-110, 110), rng.random() < 0.5,
+                   leaf_shade(), True)
     elif name == "shrub":
         for k in range(9):
             angle = rng.uniform(-60, 60)
@@ -354,7 +387,8 @@ def _card(name, parts, rng):
             _stem(stems, [(c * 0.5, c * 0.99), tip], 3)
             for t in np.linspace(0.45, 1.0, 4):
                 base = (c * 0.5 + (tip[0] - c * 0.5) * t, c * 0.99 + (tip[1] - c * 0.99) * t)
-                _place(card, pick("sprig"), base, c * rng.uniform(0.08, 0.14), angle + rng.uniform(-60, 60))
+                _place(card, pick("sprig"), base, c * rng.uniform(0.08, 0.14), angle + rng.uniform(-60, 60), False,
+                       leaf_shade(), True)
     else:   # grass
         for k in range(22):
             lean = rng.uniform(-28, 28)
@@ -368,14 +402,17 @@ STEM_SHADE = 0.35       # the stems' colour, of CARD_MEAN in each channel
 
 def _normalised(card, stems):
     """A card as uint8 RGBA (sRGB): its leaves' opaque texels scaled to a
-    mean of CARD_MEAN per channel (linear), over its stems in STEM_SHADE of
-    that, the transparent texels the mean."""
+    mean of CARD_MEAN per channel (linear) and turned towards their grey to
+    keep CARD_CHROMA of their colour, over its stems in STEM_SHADE of that,
+    the transparent texels the mean."""
     rgba = np.asarray(card).astype(np.float64) / 255.0
     alpha = rgba[..., 3:]
     linear = _srgb_to_linear(rgba[..., :3])
     weight = alpha > 0.5
     mean = (linear * weight).sum(axis=(0, 1)) / max(weight.sum(), 1.0)
     linear = linear / np.maximum(mean, 1e-4) * CARD_MEAN
+    grey = (linear @ np.array([0.2126, 0.7152, 0.0722]))[..., None]
+    linear = grey + CARD_CHROMA * (linear - grey)
     stem_alpha = np.asarray(stems)[..., 3:].astype(np.float64) / 255.0
     stem = np.full_like(linear, CARD_MEAN * STEM_SHADE)
     total = alpha + stem_alpha * (1.0 - alpha)

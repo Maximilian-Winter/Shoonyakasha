@@ -7,13 +7,14 @@
 // frame into the history (taaHistory, the frame before's result).
 //
 // A pixel's point is rebuilt from its depth (reverse-Z: 0 is the sky, taken
-// as a direction) with this frame's jitter taken out, moved by how far the
+// as a direction) at the pixel's centre, moved by how far the
 // camera moved since the frame before relative to the body under it
 // (camera.taaMotion; points on that body keep their place), and projected
 // with the frame before's projection and view (camera.prevViewProj) to find
-// where it was then. The history there (historyCatmullRom) is clamped to
-// the colours of the pixel's 3 x 3 neighbourhood in YCoCg (stale colours
-// cannot trail), then
+// where it was then. The history there (historyCatmullRom) is clamped in
+// YCoCg to the pixel's 3 x 3 neighbourhood: to its mean plus and minus
+// TAA_CLIP standard deviations, within its least and greatest (stale
+// colours cannot trail), then
 // TAA_BLEND of this frame is blended in. Both are blended as c / (1 + luma)
 // and turned back after, so a few very bright pixels do not dominate. The
 // history is dropped (this frame taken alone) where it has never been
@@ -33,6 +34,7 @@ layout(location = 0) in vec2 fragTexCoord;
 layout(location = 0) out vec4 outColor;
 
 const float TAA_BLEND = 0.1;
+const float TAA_CLIP = 1.0;
 
 float luma(vec3 c) {
     return dot(c, vec3(0.2126, 0.7152, 0.0722));
@@ -92,18 +94,24 @@ void main() {
     }
 
     // The 3 x 3 neighbourhood's range in YCoCg.
-    vec3 low = vec3(1e9), high = vec3(-1e9);
+    vec3 low = vec3(1e9), high = vec3(-1e9), sum = vec3(0.0), squares = vec3(0.0);
     for (int y = -1; y <= 1; ++y) {
         for (int x = -1; x <= 1; ++x) {
             ivec2 at = clamp(texel + ivec2(x, y), ivec2(0), size - 1);
             vec3 c = toYCoCg(compress(texelFetch(hdrColor, at, 0).rgb));
             low = min(low, c);
             high = max(high, c);
+            sum += c;
+            squares += c * c;
         }
     }
+    vec3 mean = sum / 9.0;
+    vec3 spread = TAA_CLIP * sqrt(max(squares / 9.0 - mean * mean, vec3(0.0)));
+    low = max(low, mean - spread);
+    high = min(high, mean + spread);
 
     // Where the pixel's point was the frame before.
-    vec2 ndc = fragTexCoord * 2.0 - 1.0 - camera.taa.xy;
+    vec2 ndc = fragTexCoord * 2.0 - 1.0;
     float depth = texelFetch(sceneDepth, texel, 0).r;
     vec4 viewPoint = camera.invProj * vec4(ndc, depth, 1.0);
     vec4 before;
