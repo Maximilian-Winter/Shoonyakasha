@@ -13,8 +13,11 @@ their kinds' instances where a tree grows in every cell, and the draws'
 template gives each kind its range and its instances' first index. The
 grown trees: every variant of every species, the same for the same seed
 and different for another, with a trunk thinner than the tree and
-leaving it below the crown's top; and on the GPU, vegetation.glsl's
-instances' layout and variant kinds equal vegetation.py's.
+leaving it below the crown's top, its trunk still in the wind and its
+cards swaying, each branch in its own phase; on the GPU, vegetation.glsl's
+instances' layout and variant kinds equal vegetation.py's, both scatters
+take their instances from it, and a tree's lean packs into its tint and
+back to the nearest of its directions and sizes.
 
     python -m unittest discover -s tests/python
 """
@@ -180,6 +183,10 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertEqual(constant("VEGETATION_SCAN_FIRST"), vegetation.SCAN_FIRST)
         self.assertEqual(constant("VEGETATION_SCANS"), len(scans.SCANS))
         self.assertEqual(constant("VEGETATION_VARIANTS"), vegetation.VARIANTS)
+        for scatter in ("vegetation_scatter.comp", "grass_scatter.comp"):     # their instances where the draws read them
+            source = (world.PIPELINE.parent / "shaders" / scatter).read_text(encoding="utf-8")
+            self.assertIn("vegetationFirstInstance(", source, scatter)
+            self.assertNotIn("* uint(vegetation.lod.z)", source, scatter)
         self.assertEqual(constant("VEGETATION_VARIANT_FIRST"), vegetation.VARIANT_FIRST)
         self.assertEqual(constant("VEGETATION_PART_SCAN"), vegetation.PART_SCAN)
         for name, value in (("BARK", vegetation.PART_BARK), ("CARD", vegetation.PART_CARD),
@@ -256,6 +263,19 @@ class GrownTreesTest(unittest.TestCase):
         first = vegetation.near_trees()[0]
         self.assertFalse(np.array_equal(a.meshes[first][0], a.meshes[vegetation.near_trees()[1]][0]))
 
+    def test_sway_and_phase(self):
+        for name, (vertices, _) in vegetation.trees().items():
+            parts, sway, phase = vertices[:, 7], vertices[:, 9], vertices[:, 10]
+            self.assertTrue(((sway >= 0.0) & (sway <= 1.0)).all(), name)
+            self.assertTrue(((phase >= 0.0) & (phase < 1.0)).all(), name)
+            bark = parts == vegetation.PART_BARK
+            # The trunk (the lowest bark) does not sway; the cards do, the outermost fully.
+            low = bark & (vertices[:, 1] < 0.05)
+            self.assertTrue(np.allclose(sway[low], 0.0), name)
+            cards = parts == vegetation.PART_CARD
+            self.assertGreater(float(sway[cards].max()), 0.8, name)
+            self.assertGreater(len(set(np.round(phase[cards], 4))), 3, name)
+
     def test_species_presets(self):
         self.assertEqual(sorted(tree_generator.SPECIES), sorted(vegetation.TREES))
         for name, species in tree_generator.SPECIES.items():
@@ -286,6 +306,24 @@ void main() {
 """
 
 
+LEAN_KERNEL = """#version 450
+layout(local_size_x = 64) in;
+#define VEGETATION_SET 0
+#define VEGETATION_PARAMS 0
+#include "vegetation.glsl"
+layout(std430, set = 0, binding = 1) readonly buffer Inputs { vec4 leans[]; } src;
+layout(std430, set = 0, binding = 2) writeonly buffer Outputs { vec4 values[]; } dst;
+layout(push_constant) uniform Push { uint count; } pc;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.count) return;
+    float packed = vegetationPackTint(0.375, 0u) + vegetationPackLean(src.leans[i].xy);
+    dst.values[i] = vec4(vegetationLean(packed), floor(packed), vegetationTint(packed));
+}
+"""
+
+
 class VegetationLayoutShader(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -308,6 +346,27 @@ class VegetationLayoutShader(unittest.TestCase):
     def tearDownClass(cls):
         cls.ctx.shutdown()
         shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_a_lean_packs_back(self):
+        path = self.tmp / "vegetation_lean_probe.comp"
+        path.write_text(LEAN_KERNEL, encoding="utf-8")
+        kernel = self.ctx.kernel(path, args=["-I", str(world.PIPELINE.parent / "shaders")])
+        rng = np.random.default_rng(3)
+        leans = np.concatenate([rng.uniform(-0.08, 0.08, (200, 2)), [[0.0, 0.0], [0.002, 0.0], [0.5, 0.0]]])
+        items = np.zeros((len(leans), 4), np.float32)
+        items[:, :2] = leans
+        out = np.zeros((len(leans), 4), np.float32)
+        uniform = self.ctx.upload(bytes(16 * 9 + 16 * 96))
+        self.ctx.run(kernel, [uniform, items, out], threads=len(leans), push=struct.pack("<I", len(leans)))
+        most, steps, turns = 0.07, 7, 32
+        for (x, y), (bx, by, code, tint) in zip(leans, out):
+            size = min(np.hypot(x, y), most)
+            self.assertAlmostEqual(np.hypot(bx, by), round(size / most * steps) * most / steps, places=5)
+            if round(size / most * steps):
+                turn = np.arctan2(by, bx) - np.arctan2(y, x)
+                self.assertLess(abs(np.arctan2(np.sin(turn), np.cos(turn))), np.pi / turns + 1e-5)
+            self.assertAlmostEqual(tint, 0.375, places=5)              # the tint stays its fraction
+            self.assertEqual(code, np.floor(code))
 
     def test_the_layout_and_variants_equal_vegetation_py(self):
         count = len(vegetation.KINDS)

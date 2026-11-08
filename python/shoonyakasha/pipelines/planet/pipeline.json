@@ -233,6 +233,8 @@
           "default": [ 0.0, 0.0, 0.0, 0.0 ] },
         { "name": "scans", "type": "vec4", "source": "scene.custom.planet.vegetation.scans",
           "default": [ 0.0, 1200.0, 1.0, 1.0 ] },
+        { "name": "wind", "type": "vec4", "source": "scene.custom.planet.vegetation.wind",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
         { "name": "clearings", "type": "vec4", "arrayCount": 32,
           "source": "scene.custom.planet.vegetation.clearings[i]" },
         { "name": "clearingShapes", "type": "vec4", "arrayCount": 32,

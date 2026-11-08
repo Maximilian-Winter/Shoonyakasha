@@ -12,9 +12,11 @@
 // under water (candidateWet) and by the clearings that clear grass
 // (candidateCleared), turned and tinted by
 // the hash, and coloured as its biomes' grass (the ground's plants,
-// towards straw where the biomes' grass is dry). It takes the next instance of draw
-// VEGETATION_GRASS, its instances after the other kinds' (VEGETATION_GRASS times
-// vegetation.lod.z), at most vegetation.grass.w of them.
+// towards straw where the biomes' grass is dry). Under trees the grass
+// thins: its chance falls by GRASS_UNDER_TREES times how likely a tree is
+// there (TREES_THIN_FULL: from none to full over the trees' chance). It takes the
+// next instance of draw VEGETATION_GRASS (vegetationFirstInstance), at most
+// vegetation.grass.w of them.
 //
 
 layout(local_size_x = 64) in;
@@ -24,6 +26,8 @@ layout(local_size_x = 64) in;
 const float GRASS_MIN_LEVEL = 10.0;
 const float GRASS_FADE_START = 0.7;     // of the range: where tufts start to shrink
 const int GRASS_SALT = 8;               // tells the grass's grid from the trees' in the hash
+const float GRASS_UNDER_TREES = 0.7;
+const vec2 TREES_THIN_FULL = vec2(0.3, 0.8);
 
 void main() {
     ScatterChunk chunk;
@@ -36,7 +40,7 @@ void main() {
     scatterCells(chunk, cells, cu0, cv0, across, count);
     float density = vegetation.settings.w;
     uint capacity = uint(vegetation.grass.w);
-    uint first = uint(VEGETATION_GRASS) * uint(vegetation.lod.z);
+    uint first = vegetationFirstInstance(VEGETATION_GRASS, uint(vegetation.lod.z), uint(vegetation.grass.w));
 
     for (uint k = gl_LocalInvocationID.x; k < count; k += 64u) {
         Candidate x;
@@ -48,7 +52,8 @@ void main() {
         candidateGround(chunk, x, radial, height, normal, climate);
         vec3 leaf, grass, forms;
         vec4 plants = biomePlants(radial, height, normal, climate, leaf, grass, forms);
-        if (pick >= density * plants.w) continue;
+        if (pick >= density * plants.w * (1.0 - GRASS_UNDER_TREES * smoothstep(TREES_THIN_FULL.x, TREES_THIN_FULL.y,
+                                                                               plants.x))) continue;
         float size = mix(0.3, 0.7, nextRandom(x.hash)) * smoothstep(range, range * GRASS_FADE_START, x.distance);
         if (size < 0.03) continue;
         if (candidateWet(chunk, radial) || candidateCleared(chunk, x, radial, CLEAR_GRASS, GRASS_SALT)) continue;

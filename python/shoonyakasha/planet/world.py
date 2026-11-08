@@ -145,6 +145,7 @@ GRASS_RANGE = 150.0
 ROCK_CELLS = 65536
 ROCK_RANGE = 150.0
 SCAN_RANGE = 1_200.0             # m the scans are drawn within (vegetation_scatter.comp's scans' grid)
+TREE_WIND_HEIGHT = 10.0          # m above the ground the trees' wind is taken at
 SKIRT_FRACTION = 0.05            # skirt depth, as a fraction of the chunk's edge
 HEIGHT_PAD = 0.05                # added to a node's height range, as a fraction of its edge
 ROOT_HEIGHTS = (-2000.0, 6000.0)  # the roots' height range until their chunks are measured
@@ -852,8 +853,9 @@ class PlanetWorld:
     def upload_vegetation(self):
         """This frame's vegetation settings, and its draws with no instances,
         which VegetationScatter fills; the rocks' settings with the count of
-        `taken_rocks` (its table sent when it changed), and the moon's
-        centre relative to the camera."""
+        `taken_rocks` (its table sent when it changed), the moon's centre
+        relative to the camera, and the wind (wind_at) TREE_WIND_HEIGHT above
+        the ground under the camera."""
         engine = self.engine
         engine.set_custom_vec4("planet.vegetation.settings",
                                (1.0 if self.vegetation else 0.0, self.vegetation_range, float(VEGETATION_CELLS),
@@ -873,6 +875,8 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.vegetation.moon", tuple(relative) + (0.0,))
         engine.set_custom_vec4("planet.vegetation.scans", (1.0 if self.scans and self.vegetation else 0.0, SCAN_RANGE,
                                                            float(self.scan_grid[0]), float(self.scan_grid[1])))
+        wind = self.wind_at(self.planet, self.planet.relative(self.position), TREE_WIND_HEIGHT)
+        engine.set_custom_vec4("planet.vegetation.wind", tuple(wind) + (length(wind),))
         if self.vegetation_draws is not None:
             engine.set_buffer("VegetationDraws", self.vegetation_draws)
 

@@ -19,6 +19,11 @@ lifting them towards the sky; `flat` cards lie level, facing the sky;
 `flatten` of the way from where a card grows to the highest card's
 height is where it is put, so a crown can be a level layer).
 
+A vertex's sway (vegetation's vertex layout) is how far out along the
+branches it is: 0 on the trunk, (level - 1 + t) / (levels - 1) at t along a
+branch of a later level, a card's its branch's there; its phase is its
+branch's, a seeded number from 0 to 1.
+
 `grow(species, seed)` grows one tree, the same for the same seed (a card
 that would reach into the ground points up instead, or is lifted, and a
 branch that would reach below GROUND runs level):
@@ -85,6 +90,7 @@ class Branch:
     length: float
     radius: float
     level: int
+    phase: float = 0.0
     points: list = field(default_factory=list)
     radii: list = field(default_factory=list)
 
@@ -159,11 +165,19 @@ def branches(species, rng):
             around = start + 2.0 * math.pi * k * 0.381966 + species.twist * t + rng.uniform(-0.3, 0.3)
             angle = math.radians(child.angle) * rng.uniform(0.85, 1.15)
             length = b.length * child.length * (1.0 - child.shorten * t) * rng.uniform(0.85, 1.15)
-            todo.append(Branch(p, tilt(d, angle, around), length, max(r * child.radius, 1e-3), b.level + 1))
+            todo.append(Branch(p, tilt(d, angle, around), length, max(r * child.radius, 1e-3), b.level + 1,
+                               float(rng.random())))
     return out
 
 
-def tube(builder, b, segments, shade):
+def sway(b, t, levels):
+    """A point's sway `t` along branch `b` of a tree of `levels` levels."""
+    if b.level == 0 or levels < 2:
+        return 0.0
+    return min((b.level - 1 + t) / (levels - 1), 1.0)
+
+
+def tube(builder, b, segments, shade, levels):
     """A bark tube along branch `b`'s points, its rings turned along with it."""
     from .vegetation import PART_BARK
     side = perpendicular(unit(b.points[1] - b.points[0]))
@@ -176,10 +190,11 @@ def tube(builder, b, segments, shade):
         if i:
             v += np.linalg.norm(p - b.points[i - 1]) / (2.0 * math.pi * max(b.radii[0], 1e-3))
         ring = []
+        moves = sway(b, i / (len(b.points) - 1), levels)
         for k in range(segments + 1):
             a = 2.0 * math.pi * k / segments
             n = math.cos(a) * side + math.sin(a) * other
-            ring.append(builder.vertex(p + r * n, n, PART_BARK, shade, (k / segments, v)))
+            ring.append(builder.vertex(p + r * n, n, PART_BARK, shade, (k / segments, v), moves, b.phase))
         rings.append(ring)
     for a, c in zip(rings, rings[1:]):
         for k in range(segments):
@@ -195,7 +210,7 @@ def grow(species, seed):
     last = len(species.levels) - 1
     for b in grown:
         level = species.levels[b.level]
-        tube(builder, b, level.segments, 0.8 if b.level == 0 else 0.9)
+        tube(builder, b, level.segments, 0.8 if b.level == 0 else 0.9, len(species.levels))
     leaves = species.leaves
     placed = []
     for b in grown:
@@ -211,14 +226,15 @@ def grow(species, seed):
                 out = unit(np.array([out[0], 0.15 * rng.normal(), out[2]]))
                 facing = unit(np.array([0.0, 1.0, 0.0]) + rng.normal(0.0, 0.2, 3))
             placed.append((p, out, facing, leaves.size * rng.uniform(0.8, 1.2),
-                           leaves.cards[int(rng.integers(len(leaves.cards)))]))
+                           leaves.cards[int(rng.integers(len(leaves.cards)))],
+                           sway(b, t, len(species.levels)), b.phase))
     if placed and leaves.flatten > 0.0:
         top = max(p[1] for p, *_ in placed)
         placed = [(p + np.array([0.0, (top - p[1]) * leaves.flatten, 0.0]), *rest) for p, *rest in placed]
     bases = np.array([p for p, *_ in placed]) if placed else np.zeros((1, 3))
     centre = bases.mean(axis=0)
     radii = np.maximum(np.abs(bases - centre).max(axis=0), 0.05)
-    for p, out, facing, size, card in placed:
+    for p, out, facing, size, card, moves, phase in placed:
         if p[1] + out[1] * size < 0.0:            # a card that would reach into the ground points up
             out = unit(np.array([out[0], abs(out[1]), out[2]]))
         across = unit(np.cross(out, unit(facing)))
@@ -228,7 +244,7 @@ def grow(species, seed):
         tip = p + out * size
         builder.card(p, out, facing, size, size, vegetation_textures.card_rect(card), centre,
                      _crown_shade(p, centre, radii), _crown_shade(tip, centre, radii),
-                     crown_normal=species.crown_normal)
+                     crown_normal=species.crown_normal, sway=moves, phase=phase)
     vertices, indices = builder.arrays()
     height = max(float(np.array(builder.vertices)[:, 1].max()), 1e-6)
     first = min((b for b in grown if b.level == 1), key=lambda b: b.origin[1], default=None)

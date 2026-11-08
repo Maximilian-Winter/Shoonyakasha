@@ -6,7 +6,8 @@
 // water as the sea floor at the water's depth (lakes.glsl's lakeAt,
 // rivers.glsl's riverAt, tested where a vertex of its triangle has water
 // near, terrain.vert), darkened where it is wet just above the sea or a
-// lake near it (geology.glsl's wetShore), and the moon's grey
+// lake near it (geology.glsl's wetShore) and under the forest's canopy
+// (CANOPY_DARKEN times the forest layer's weight squared), and the moon's grey
 // (moonColour), both detailed by the ground's textures (ground.glsl); with
 // the biome view on (terrain.biomeView.x), the planet's ground takes its
 // biomes' flat colours (biomeViewColour) instead. Otherwise it takes the
@@ -56,6 +57,7 @@ vec3 moonColour(vec3 radial, vec3 normal) {
 }
 
 const int MOON = 1;          // the moon's body index, as chunk_build.comp
+const float CANOPY_DARKEN = 0.35;
 
 void main() {
     vec3 normal = normalize(fragNormal);
@@ -87,7 +89,7 @@ void main() {
             float wet = wetShore(radial, height);
             int lake = fragWaterNear > 0.0 ? lakeNear(radial, WET_HEIGHT * 20.0) : -1;
             if (lake >= 0) wet = max(wet, wetShore(radial, height - terrain.lakes[lake].w));
-            albedo *= 1.0 - WET_DARKEN * wet;
+            albedo *= (1.0 - WET_DARKEN * wet) * (1.0 - CANOPY_DARKEN * weights[GROUND_FOREST] * weights[GROUND_FOREST]);
         }
     }
     if (fragBody == MOON) {

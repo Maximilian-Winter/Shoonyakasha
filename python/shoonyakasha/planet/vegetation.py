@@ -29,9 +29,11 @@ the kinds vegetation_scatter.comp and grass_scatter.comp place:
 
 A vertex is three vec4: position (xyz) and the texture's u; the normal
 (xyz) and the part (w: PART_BARK, PART_CARD, PART_GRASS, PART_IMPOSTOR,
-PART_PLAIN, or a scan's part); and a shade (rgb: 1 in the open, darker
-deep in a crown or low down; a scan's tangent instead) and the texture's
-v. A scan's part is PART_SCAN + 4 x its material's atlas cell + 2 when the
+PART_PLAIN, or a scan's part); and (r) a shade (1 in the open, darker
+deep in a crown or low down), (g) its sway in the wind (0 on a trunk, 1
+at the tip of the outermost branches and on cards; 0 on plain parts) and
+(b) its phase in the wind (0 .. 1), or a scan's tangent (rgb), and the
+texture's v. A scan's part is PART_SCAN + 4 x its material's atlas cell + 2 when the
 material is cut out by its alpha + 1 when its bitangent is the tangent's
 cross the normal turned round (scan_part); its (u, v) are its material's
 own, which the shaders map into its cell. Bark's (u, v) are in tiles of the bark
@@ -99,13 +101,18 @@ class _Builder:
         self.vertices = []
         self.indices = []
 
-    def vertex(self, p, n, part, shade, uv):
-        self.vertices.append((p[0], p[1], p[2], uv[0], n[0], n[1], n[2], float(part), shade, shade, shade, uv[1]))
+    def vertex(self, p, n, part, shade, uv, sway=None, phase=None):
+        """A vertex; its sway 1 for cards and grass and 0 otherwise when None, its phase from its position."""
+        if sway is None:
+            sway = 1.0 if part in (PART_CARD, PART_GRASS) else 0.0
+        if phase is None:
+            phase = (p[0] * 12.9898 + p[1] * 78.233 + p[2] * 37.719) % 1.0
+        self.vertices.append((p[0], p[1], p[2], uv[0], n[0], n[1], n[2], float(part), shade, sway, phase, uv[1]))
         return len(self.vertices) - 1
 
-    def quad(self, corners, normals, part, shades, uvs):
+    def quad(self, corners, normals, part, shades, uvs, sway=None, phase=None):
         """Corners counter-clockwise from the bottom left, seen from the front."""
-        k = [self.vertex(c, n, part, s, uv) for c, n, s, uv in zip(corners, normals, shades, uvs)]
+        k = [self.vertex(c, n, part, s, uv, sway, phase) for c, n, s, uv in zip(corners, normals, shades, uvs)]
         self.indices += [k[0], k[1], k[2], k[0], k[2], k[3]]
 
     def tube(self, a, b, ra, rb, sides, shade, part=PART_BARK, v_scale=None):
@@ -133,7 +140,7 @@ class _Builder:
             self.indices += [i0, j0, j1, i0, j1, i1]
 
     def card(self, base, up, facing, width, length, rect, centre, shade_base, shade_tip, part=PART_CARD,
-             crown_normal=CROWN_NORMAL):
+             crown_normal=CROWN_NORMAL, sway=None, phase=None):
         """A card from `base` along `up` for `length`, `width` across,
         facing `facing`, showing the atlas rect (bottom of the card's image
         at `base`); normals out from `centre`, leaning to `facing`."""
@@ -150,7 +157,7 @@ class _Builder:
             normals.append(_unit(n))
         u0, v0, u1, v1 = rect
         uvs = [(u0, v1), (u1, v1), (u1, v0), (u0, v0)]
-        self.quad(corners, normals, part, (shade_base, shade_base, shade_tip, shade_tip), uvs)
+        self.quad(corners, normals, part, (shade_base, shade_base, shade_tip, shade_tip), uvs, sway, phase)
 
     def arrays(self):
         """(vertices, indices), scaled about the base so the highest point is at 1."""
@@ -300,7 +307,7 @@ def rock_triangles(name):
     (N x 3 each, three rows per triangle)."""
     vertices, indices = _rock(*ROCKS[name]).arrays()
     v = vertices[indices]
-    return v[:, 0:3], v[:, 4:7], v[:, 8:11]
+    return v[:, 0:3], v[:, 4:7], np.repeat(v[:, 8:9], 3, axis=1)
 
 
 def scan_part(cell, cutout, flipped):

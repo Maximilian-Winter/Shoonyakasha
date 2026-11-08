@@ -2,7 +2,7 @@
 //
 // The vegetation into one cascade of the sun's shadow map, the cascade
 // from the pass's repeat index: each plant placed, turned and scaled as
-// vegetation.vert places it, without the sway, an impostor's quad facing
+// vegetation.vert places it (leaning as it leans), without the sway, an impostor's quad facing
 // the sun (the cascade's depth axis, turned to the sky) instead of the
 // camera, with its point and the sun's direction in the tree's frame. Plants farther
 // from the camera than the cascade's far split and SHADOW_VEGETATION_MARGIN
@@ -74,6 +74,10 @@ void main() {
                            fragView);
     } else {
         offset = (right * inPosition.x * width + up * inPosition.y + ahead * inPosition.z * width) * placed.w;
+    }
+    if (fragPart == VEGETATION_PART_BARK || fragPart == VEGETATION_PART_CARD || fragPart == VEGETATION_PART_IMPOSTOR) {
+        vec2 lean = vegetationLean(look.z);
+        offset += (right * lean.x + ahead * lean.y) * (inPosition.y * placed.w);
     }
     gl_Position = viewProj * vec4(placed.xyz + offset, 1.0);
 }

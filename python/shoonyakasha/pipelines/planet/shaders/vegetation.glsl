@@ -14,6 +14,8 @@
 //                face side; w: the entries in TakenRocks
 //     moon       xyz: the moon's centre less the camera's position (m)
 //     scans      x: 1 on, 0 off; y: their range (m); z, w: the scans' atlas's columns and rows of cells
+//     wind       xyz: the wind's velocity (m/s, planet space) TREE_WIND_HEIGHT above the ground under
+//                the camera; w: its speed
 //     clearings, clearingShapes, clearingAxes   the clearings (clearings.glsl)
 //
 // Kinds (one indirect draw each, as shoonyakasha.planet.vegetation.KINDS):
@@ -70,6 +72,7 @@ layout(set = VEGETATION_SET, binding = VEGETATION_PARAMS) uniform VegetationPara
     vec4 rocks;
     vec4 moon;
     vec4 scans;
+    vec4 wind;
     vec4 clearings[32];
     vec4 clearingShapes[32];
     vec4 clearingAxes[32];
@@ -88,6 +91,32 @@ vec4 vegetationScanCell(int cell) {
     vec2 grid = max(vegetation.scans.zw, vec2(1.0));
     vec2 size = 1.0 / grid;
     return vec4(vec2(float(cell % int(grid.x)), float(cell / int(grid.x))) * size, size);
+}
+
+// A tree's lean (its up tilted by `lean`, radians along its right (x) and
+// its ahead (y), at most VEGETATION_LEAN_MOST) as a whole number added to
+// its packed tint: 0 for none, else 1 + one of VEGETATION_LEAN_TURNS
+// directions + VEGETATION_LEAN_TURNS x (one of VEGETATION_LEAN_STEPS
+// sizes - 1). A tree has no resource, so the tint's whole part is free.
+const float VEGETATION_LEAN_MOST = 0.07;
+const int VEGETATION_LEAN_TURNS = 32;
+const int VEGETATION_LEAN_STEPS = 7;
+
+float vegetationPackLean(vec2 lean) {
+    float size = min(length(lean), VEGETATION_LEAN_MOST);
+    int step = int(round(size / VEGETATION_LEAN_MOST * float(VEGETATION_LEAN_STEPS)));
+    if (step == 0) return 0.0;
+    float turn = atan(lean.y, lean.x) / 6.2831853;
+    int k = int(round(fract(turn) * float(VEGETATION_LEAN_TURNS))) % VEGETATION_LEAN_TURNS;
+    return float(1 + k + VEGETATION_LEAN_TURNS * (step - 1));
+}
+
+vec2 vegetationLean(float packed) {
+    int code = int(floor(packed));
+    if (code <= 0) return vec2(0.0);
+    int k = (code - 1) % VEGETATION_LEAN_TURNS, step = (code - 1) / VEGETATION_LEAN_TURNS + 1;
+    float turn = 6.2831853 * float(k) / float(VEGETATION_LEAN_TURNS);
+    return vec2(cos(turn), sin(turn)) * (VEGETATION_LEAN_MOST * float(step) / float(VEGETATION_LEAN_STEPS));
 }
 
 // Whether `kind` is a tree's, near or far, of any variant.

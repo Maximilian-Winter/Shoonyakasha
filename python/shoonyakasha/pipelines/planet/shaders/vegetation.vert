@@ -9,10 +9,17 @@
 // and turned about its up, except an impostor's quad, which faces the
 // camera about its tree's bounding sphere (vegetationImpostor), handing
 // the fragment shader its point in the tree's frame (fragLocal) and the
-// camera's direction in it (fragTangent). Foliage cards and grass sway in the wind: their points move
-// along it by up to SWAY of their height above the plant's base squared
-// (GRASS_SWAY for grass), a sine of the time whose phase follows the
-// plant's place on the planet. The fragment shader gets the part, the
+// camera's direction in it (fragTangent). In the wind (vegetation.wind, along the
+// ground) a tree bends: every point of it, its impostor's too, moves along
+// the wind by TRUNK_BEND of the plant's height times its height's share
+// squared, swinging slowly (TRUNK_HZ); its branches and cards sway by
+// BRANCH_SWAY of its height times their sway (the vertex's colour.g)
+// (BRANCH_HZ, their phase colour.b); its cards flutter along their normal
+// by FLUTTER m (FLUTTER_HZ); grass sways by GRASS_SWAY of its height times
+// its height's share squared. Each scales with the wind's speed over
+// WIND_FULL (at most WIND_MOST), its phase following the plant's place on
+// the planet. A tree leans by its packed lean (vegetationLean): each point
+// moves across by the lean times its height. The fragment shader gets the part, the
 // texture's (u, v), the shade, the plant's colour (tinted from 80 % to
 // 115 %; white for bark) and the plant's frame (an impostor's facing the
 // camera), the mesh's own position and an ore rock's resource; for a
@@ -50,8 +57,15 @@ layout(location = 11) flat out int fragResource;   // an ore rock's resource id,
 layout(location = 12) out vec3 fragTangent;          // a scan's; zero for anything else
 layout(location = 13) flat out vec4 fragCell;        // a scan's cell in the scans' atlas
 
-const float SWAY = 0.015;
-const float GRASS_SWAY = 0.12;
+const float TRUNK_BEND = 0.015;     // of the height, at the top
+const float TRUNK_HZ = 0.2;
+const float BRANCH_SWAY = 0.003;    // of the height, at a branch's tip
+const float BRANCH_HZ = 0.7;
+const float FLUTTER = 0.012;        // m
+const float FLUTTER_HZ = 4.5;
+const float GRASS_SWAY = 0.12;      // of the height, at the top
+const float WIND_FULL = 15.0;       // m/s
+const float WIND_MOST = 1.5;
 
 void main() {
     vec4 placed = instances.data[gl_InstanceIndex * 2];
@@ -71,11 +85,26 @@ void main() {
         offset = (right * inPosition.x * width + up * inPosition.y + ahead * inPosition.z * width) * placed.w;
         normal = normalize(right * inNormal.x / width + up * inNormal.y + ahead * inNormal.z / width);
     }
-    if (part == VEGETATION_PART_CARD || part == VEGETATION_PART_GRASS) {
-        vec3 wind = normalize(vec3(1.0, 0.0, 0.3) - up * dot(vec3(1.0, 0.0, 0.3), up));
-        float phase = dot(camera.cameraFromCentre.xyz + placed.xyz, vec3(0.37, 0.53, 0.29));
-        float sway = part == VEGETATION_PART_GRASS ? GRASS_SWAY : SWAY;
-        offset += wind * (sway * inPosition.y * inPosition.y * placed.w * sin(camera.time * 2.1 + phase));
+    vec3 wind = vegetation.wind.xyz - up * dot(vegetation.wind.xyz, up);
+    float speed = length(wind);
+    float strength = min(speed / WIND_FULL, WIND_MOST);
+    vec3 along = speed > 1e-3 ? wind / speed : right;
+    float phase = dot(camera.cameraFromCentre.xyz + placed.xyz, vec3(0.37, 0.53, 0.29));
+    float t = camera.time * 6.2831853;
+    if (part == VEGETATION_PART_BARK || part == VEGETATION_PART_CARD || part == VEGETATION_PART_IMPOSTOR) {
+        float y = inPosition.y;
+        vec2 lean = vegetationLean(look.z);
+        offset += (right * lean.x + ahead * lean.y) * (y * placed.w);
+        offset += along * (TRUNK_BEND * strength * y * y * placed.w * (0.75 + 0.25 * sin(t * TRUNK_HZ + phase)));
+        if (part != VEGETATION_PART_IMPOSTOR) {
+            float sway = inColour.g, own = inColour.b * 6.2831853 + phase;
+            offset += along * (BRANCH_SWAY * strength * sway * placed.w * sin(t * BRANCH_HZ + own));
+            if (part == VEGETATION_PART_CARD) {
+                offset += normal * (FLUTTER * strength * sway * sin(t * FLUTTER_HZ + 7.0 * own));
+            }
+        }
+    } else if (part == VEGETATION_PART_GRASS) {
+        offset += along * (GRASS_SWAY * strength * inPosition.y * inPosition.y * placed.w * sin(t * 0.33 + phase));
     }
     vec3 relativePos = placed.xyz + offset;
     fragNormal = normal;
