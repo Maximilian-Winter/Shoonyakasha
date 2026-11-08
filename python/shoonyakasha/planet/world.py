@@ -823,14 +823,16 @@ class PlanetWorld:
     def upload_vegetation_meshes(self):
         """The vegetation's textures (vegetation_textures: the foliage atlas
         and the bark), the trees grown from the planet's seed
-        (vegetation.forest), their impostors baked from their meshes and those
-        (vegetation_impostors), the scans' atlases (scans.atlas), the meshes
+        (vegetation.forest), their octahedral impostors baked from their
+        meshes on the engine's device (vegetation_impostors.cached_bake) and
+        those, the scans' atlases (scans.atlas), the meshes
         (vegetation.py, with the prepared scans) and the draws' template."""
         engine = self.engine
         seed = tuple(self.planet.terrain["seed"][:3])
         self.tree_seed = seed
         atlas, bark = vegetation_textures.atlas(), vegetation_textures.bark()
-        albedo, normals, rects = vegetation_impostors.bake(vegetation.trees(seed), atlas, bark)
+        albedo, normals, rects, _ = vegetation_impostors.cached_bake(vegetation.trees(seed), atlas, bark,
+                                                                     engine.compute)
         engine.set_pipeline_image_data("vegetationAtlas", atlas, format="R8G8B8A8_SRGB", mipmaps=True)
         engine.set_pipeline_image_data("vegetationBark", bark, format="R8G8B8A8_SRGB", mipmaps=True)
         engine.set_pipeline_image_data("vegetationImpostor", albedo, format="R8G8B8A8_SRGB", mipmaps=True)

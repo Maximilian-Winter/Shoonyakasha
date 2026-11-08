@@ -269,6 +269,8 @@ class CaptureTour:
         ("vegetation_mixed_wood", 1, False, 0, None, DAY_SUN, lambda: over_ground(8_000.0, 180.0, 260.0, 10.0)),
         ("grass_meadow", 1, False, 0, None, DAY_SUN, lambda: over_ground(3_000.0, 180.0, 2.5, 6.0)),
         ("scans_forest_floor", 1, False, 0, None, SCAN_SUN, lambda: over_ground(8_000.0, 180.0, 1.6, 18.0)),
+        ("trees_from_the_car", 1, False, 0, None, SCAN_SUN, lambda: over_ground(8_000.0, 180.0, 420.0, 30.0)),
+        ("trees_from_above", 1, False, 0, None, SCAN_SUN, lambda: over_ground(8_000.0, 180.0, 600.0, 60.0)),
         ("scans_desert", 1, False, 0, None, SCAN_SUN, lambda: setattr(world, "moisture_offset", -0.8),
          lambda: over_ground(3_000.0, 180.0, 1.6, 10.0)),
         ("scans_desert_down", 1, False, 0, None, SCAN_SUN, lambda: setattr(world, "moisture_offset", -0.8),

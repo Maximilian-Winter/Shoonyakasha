@@ -181,10 +181,25 @@ void vegetationFrame(vec3 fromCentre, vec3 relative, vec2 turn, out vec3 right, 
     ahead = cross(right, up);
 }
 
-// An impostor's frame: its quad stands along `up` and faces `towards`
-// (flattened square to `up`); `right` is across it, `facing` out of it.
-void vegetationBillboard(vec3 up, vec3 towards, out vec3 right, out vec3 facing) {
-    facing = towards - up * dot(towards, up);
-    facing = length(facing) < 1e-6 ? cross(up, vec3(1.0, 0.0, 0.0)) : normalize(facing);
-    right = normalize(cross(up, facing));
+// An impostor's quad corner (shoonyakasha.planet.vegetation's far kinds:
+// a vertex's position is the corner of a square about its tree's bounding
+// sphere, its colour.rgb the corner's signs (x, y) and the sphere's radius,
+// in the tree's units): the quad faces `towards` (from the sphere's centre)
+// across the tree's `up`, the tree `height` m tall and `width` wide.
+// `offset` is the corner from the plant's base; `local` the corner from the
+// sphere's centre in the tree's frame (right, up, ahead), in radii; `view`
+// the direction `towards` in the tree's frame.
+void vegetationImpostor(vec3 right, vec3 up, vec3 ahead, float height, float width, vec4 position, vec3 corner,
+                        vec3 towards, out vec3 offset, out vec3 local, out vec3 view) {
+    float radius = corner.z;
+    float centreY = position.y - corner.y * radius;
+    vec3 axis = normalize(towards);
+    vec3 across = cross(up, axis);
+    across = dot(across, across) < 1e-8 ? right : normalize(across);
+    vec3 above = cross(axis, across);
+    vec3 d = (across * corner.x + above * corner.y) * (radius * height * max(width, 1.0));
+    offset = up * (centreY * height) + d;
+    local = vec3(dot(d, right) / width, dot(d, up), dot(d, ahead) / width) / (radius * height);
+    view = vec3(dot(axis, right), dot(axis, up), dot(axis, ahead));
 }
+

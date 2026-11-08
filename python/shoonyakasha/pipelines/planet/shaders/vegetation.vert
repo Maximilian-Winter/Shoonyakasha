@@ -6,8 +6,10 @@
 // VegetationInstances by gl_InstanceIndex (the draw's first instance is its
 // kind's first). The mesh's y is the plant's up, away from the planet's
 // centre; it is scaled by the plant's height, across by vegetationWidth,
-// and turned about its up, except an impostor's quad, which turns to face
-// the camera. Foliage cards and grass sway in the wind: their points move
+// and turned about its up, except an impostor's quad, which faces the
+// camera about its tree's bounding sphere (vegetationImpostor), handing
+// the fragment shader its point in the tree's frame (fragLocal) and the
+// camera's direction in it (fragTangent). Foliage cards and grass sway in the wind: their points move
 // along it by up to SWAY of their height above the plant's base squared
 // (GRASS_SWAY for grass), a sine of the time whose phase follows the
 // plant's place on the planet. The fragment shader gets the part, the
@@ -60,10 +62,11 @@ void main() {
     vec3 right, up, ahead;
     vegetationFrame(vegetationCameraFromCentre(look.w), placed.xyz, look.xy, right, up, ahead);
     vec3 offset, normal;
+    vec3 local = inPosition.xyz, view = vec3(0.0);
     if (part == VEGETATION_PART_IMPOSTOR) {
-        vegetationBillboard(up, -placed.xyz, right, ahead);
-        offset = (right * inPosition.x * width + up * inPosition.y) * placed.w;
-        normal = ahead;
+        vec3 centre = placed.xyz + up * ((inPosition.y - inColour.y * inColour.z) * placed.w);
+        vegetationImpostor(right, up, ahead, placed.w, width, inPosition, inColour.xyz, -centre, offset, local, view);
+        normal = normalize(-centre);
     } else {
         offset = (right * inPosition.x * width + up * inPosition.y + ahead * inPosition.z * width) * placed.w;
         normal = normalize(right * inNormal.x / width + up * inNormal.y + ahead * inNormal.z / width);
@@ -82,7 +85,7 @@ void main() {
     fragPart = part;
     fragUv = vec2(inPosition.w, inColour.w);
     fragShade = inColour.r;
-    fragTangent = vec3(0.0);
+    fragTangent = view;
     fragCell = vec4(0.0);
     if (part >= VEGETATION_PART_SCAN) {
         int cell;
@@ -97,7 +100,7 @@ void main() {
     fragUp = up;
     fragFacing = ahead;
     fragOnMoon = vegetationOnMoon(look.w) ? 1 : 0;
-    fragLocal = inPosition.xyz;
+    fragLocal = local;
     fragResource = vegetationOre(look.w) ? int(vegetationResource(look.z)) : 0;
     gl_Position = jittered(camera.proj * camera.view * vec4(relativePos, 1.0));
 }

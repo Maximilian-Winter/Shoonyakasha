@@ -7,9 +7,10 @@
 //     card      the foliage atlas (each card's mean is CARD_MEAN, so it is
 //     grass     times 2) times the plant's colour and the shade; a texel
 //               whose coverage is below 1/2 is not drawn (foliage.glsl)
-//     impostor  the impostor's texel, times 2 and the plant's colour where
-//               its normal's alpha marks foliage; its normal from the
-//               impostor's normals in the quad's frame
+//     impostor  its tree's octahedral views blended (foliage.glsl's
+//               impostorTexel), times 2 and the plant's colour where its
+//               normal's alpha marks foliage; its normal from the views'
+//               normals in the tree's frame
 //     plain     the plant's colour times the shade
 //     scan      its material's texel in the scans' atlas (foliage.glsl's
 //               scanTexel) times the plant's colour, not drawn where a
@@ -100,8 +101,8 @@ void main() {
         vec4 texel = foliageTexel(vegetationAtlas, fragUv, drawn);
         albedo = 2.0 * texel.rgb * fragColour * fragShade;
     } else if (fragPart == PART_IMPOSTOR) {
-        vec4 texel = foliageTexel(vegetationImpostor, fragUv, drawn);
-        vec4 bumps = texture(vegetationImpostorNormal, fragUv);
+        vec4 texel, bumps;
+        impostorTexel(fragLocal, fragTangent, fragUv, false, texel, bumps, drawn);
         vec3 n = bumps.xyz * 2.0 - 1.0;
         normal = normalize(fragRight * n.x + fragUp * n.y + fragFacing * n.z);
         foliage = bumps.a > 0.5;

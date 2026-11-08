@@ -10,8 +10,9 @@ the kinds vegetation_scatter.comp and grass_scatter.comp place:
     broadleaf_a, broadleaf_b  a round crown and a tall oval one
     acacia                    a flat-topped crown on a forked trunk
     each tree grown by tree_generator from its species (SPECIES) as variant
-    0 of VARIANTS; each also "far": one camera-facing quad showing its
-    impostor (vegetation_impostors), as wide as the tree
+    0 of VARIANTS; each also "far": one camera-facing square about its
+    bounding sphere (vegetation_impostors.sphere) showing its octahedral
+    impostor
     bush                      a mound of cluster cards
     shrub                     a few upright cards of bare twigs and leaves
     cactus                    a ribbed column with an arm or two
@@ -34,8 +35,13 @@ v. A scan's part is PART_SCAN + 4 x its material's atlas cell + 2 when the
 material is cut out by its alpha + 1 when its bitangent is the tangent's
 cross the normal turned round (scan_part); its (u, v) are its material's
 own, which the shaders map into its cell. Bark's (u, v) are in tiles of the bark
-texture around and up the trunk (in its height's units); cards' and
-impostors' are in their atlas. A card's normal points out from its crown's
+texture around and up the trunk (in its height's units); cards' are in
+their atlas. An impostor's vertex is a corner of the square about its
+tree's sphere (x the corner's sign times the radius, y the centre's height
+plus its sign times the radius), its normal (0, 0, 1), its colour.rgb the
+corner's signs (x, y) and the radius, and its (u, v) its tree's block's
+first corner in the impostors' atlas (vegetation.glsl's
+vegetationImpostor). A card's normal points out from its crown's
 centre, leaning towards the card's own, so a crown is lit as a whole.
 
 `forest(seed)` grows every variant of every tree from the world's
@@ -49,8 +55,8 @@ height its first branch leaves it, as shares of its height).
 `meshes(impostor_rects=None, scan_cells=None, seed=None)` gives every kind's
 vertices in one array, the indices in one array (into the whole vertex
 array) and each kind's (first index, index count); `impostor_rects` maps
-a tree's name to its impostor's (u0, v0, u1, v1) (the whole image without
-it), `scan_cells` maps (scan kind, material) to its atlas cell
+a near tree kind to its impostor's block (u0, v0, u1, v1) (from (0, 0)
+without it), `scan_cells` maps (scan kind, material) to its atlas cell
 (scans.atlas); a scan not prepared, or without `scan_cells`, has no
 triangles; the trees are `forest(seed)`'s (seed (0, 0, 0) when None).
 `trees(seed=None)` gives each near tree kind's mesh by name, for baking
@@ -69,6 +75,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from . import scans, tree_generator, vegetation_textures
+from .vegetation_impostors import sphere
 
 TREES = ("conifer_a", "conifer_b", "broadleaf_a", "broadleaf_b", "acacia")
 VARIANTS = 4                 # grown trees of each species
@@ -85,11 +92,6 @@ ROCK_SINK = 0.25             # units a rock reaches below its base
 PART_BARK, PART_CARD, PART_GRASS, PART_IMPOSTOR, PART_PLAIN, PART_SCAN = range(6)
 CROWN_NORMAL = 0.75          # of a card's normal: the share pointing out from the crown's centre
 GRASS_UP = 0.65              # of a grass card's normal: the share that is straight up
-
-
-def impostor_width(vertices):
-    """The width of a tree's impostor: twice its furthest point from its axis."""
-    return float(2.0 * np.sqrt(vertices[:, 0] ** 2 + vertices[:, 2] ** 2).max())
 
 
 class _Builder:
@@ -340,12 +342,13 @@ def _grass():
     return b
 
 
-def _impostor(width, rect):
-    b = _Builder()
-    u0, v0, u1, v1 = rect
-    corners = [(-width / 2, 0.0, 0.0), (width / 2, 0.0, 0.0), (width / 2, 1.0, 0.0), (-width / 2, 1.0, 0.0)]
-    b.quad(corners, [(0.0, 0.0, 1.0)] * 4, PART_IMPOSTOR, (1.0, 1.0, 1.0, 1.0), [(u0, v1), (u1, v1), (u1, v0), (u0, v0)])
-    return b
+def _impostor(centre, radius, rect):
+    """(vertices, indices) of the square about a tree's sphere, showing its block from `rect`'s first corner."""
+    u0, v0 = rect[0], rect[1]
+    corners = ((-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0))
+    vertices = np.array([(x * radius, centre + y * radius, 0.0, u0, 0.0, 0.0, 1.0, float(PART_IMPOSTOR), x, y, radius, v0)
+                         for x, y in corners], np.float32)
+    return vertices, np.array([0, 1, 2, 0, 2, 3], np.uint32)
 
 
 def species_of(kind):
@@ -413,7 +416,7 @@ def meshes(impostor_rects=None, scan_cells=None, seed=None):
             if name.endswith("_far"):
                 tree = name[:-4]
                 rect = (impostor_rects or {}).get(tree, (0.0, 0.0, 1.0, 1.0))
-                vertices, indices = _impostor(impostor_width(grown[tree][0]), rect).arrays()
+                vertices, indices = _impostor(*sphere(grown[tree][0]), rect)
             else:
                 vertices, indices = grown[name]
             parts.append(vertices)

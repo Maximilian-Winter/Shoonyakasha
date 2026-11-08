@@ -2,8 +2,8 @@
 the kinds' index ranges cover whole triangles of their own vertices, every
 kind is one unit tall from its base (a rock reaching ROCK_SINK below it),
 normals are of unit length, each kind is made of the parts it should be
-(trees of bark and cards, far kinds of one impostor quad as wide as the
-tree, bushes of cards, the cactus and the rocks plain, grass of grass
+(trees of bark and cards, far kinds of one square about the tree's
+bounding sphere, bushes of cards, the cactus and the rocks plain, grass of grass
 cards), the rocks are centred on their axis and closed with outward
 normals, cards show their atlas cards and impostors the
 rects given, crowns' normals point out of the crown, grass leans up and is
@@ -32,7 +32,7 @@ import numpy as np
 
 import shoonyakasha as sk
 from shoonyakasha import shaders
-from shoonyakasha.planet import scans, tree_generator, vegetation, vegetation_textures, world
+from shoonyakasha.planet import scans, tree_generator, vegetation, vegetation_impostors, vegetation_textures, world
 
 
 class VegetationMeshTest(unittest.TestCase):
@@ -64,7 +64,8 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertEqual(last_vertex, len(self.vertices) - 1)
 
     def test_kinds_are_one_unit_tall_from_their_base(self):
-        for name in [k for k in vegetation.KINDS if k not in scans.NAMES]:   # the scans: test_scan_mesh_from_a_prepared_scan
+        # The scans: test_scan_mesh_from_a_prepared_scan; the far kinds: test_impostors_are_squares_about_their_sphere.
+        for name in [k for k in vegetation.KINDS if k not in scans.NAMES and not k.endswith("_far")]:
             part = self.kind(name)
             self.assertAlmostEqual(float(part[:, 1].max()), 1.0, places=5, msg=name)
             if name in vegetation.ROCKS:
@@ -113,21 +114,27 @@ class VegetationMeshTest(unittest.TestCase):
                   & (v[:, None] >= rects[:, 1] - 1e-6) & (v[:, None] <= rects[:, 3] + 1e-6))
         self.assertTrue(inside.any(axis=1).all())
 
-    def test_impostors_are_quads_as_wide_as_their_tree_showing_their_rect(self):
+    def test_impostors_are_squares_about_their_sphere(self):
         trees = vegetation.trees()
         for tree in vegetation.near_trees():
             quad = self.kind(tree + "_far")
             self.assertEqual(len(quad), 4)
-            width = vegetation.impostor_width(trees[tree][0])
-            self.assertAlmostEqual(float(quad[:, 0].max() - quad[:, 0].min()), width, places=5)
-            u0, v0, u1, v1 = self.rects[tree]
-            self.assertEqual(sorted(set(np.round(quad[:, 3], 6))), sorted({round(u0, 6), round(u1, 6)}))
-            self.assertEqual(sorted(set(np.round(quad[:, 11], 6))), sorted({round(v0, 6), round(v1, 6)}))
+            centre, radius = vegetation_impostors.sphere(trees[tree][0])
+            corners = quad[:, 8:10]
+            self.assertEqual(sorted(map(tuple, corners.tolist())), [(-1, -1), (-1, 1), (1, -1), (1, 1)])
+            np.testing.assert_allclose(quad[:, 10], radius, rtol=1e-6)
+            np.testing.assert_allclose(quad[:, 0], corners[:, 0] * radius, rtol=1e-5, atol=1e-6)
+            np.testing.assert_allclose(quad[:, 1], centre + corners[:, 1] * radius, rtol=1e-5, atol=1e-6)
+            u0, v0 = self.rects[tree][:2]
+            np.testing.assert_allclose(quad[:, 3], u0, atol=1e-6)
+            np.testing.assert_allclose(quad[:, 11], v0, atol=1e-6)
 
-    def test_impostor_width_reaches_the_furthest_point(self):
+    def test_the_sphere_reaches_the_furthest_point(self):
         vertices = np.zeros((3, 12), np.float32)
-        vertices[:, 0], vertices[:, 2] = (0.3, -0.1, 0.0), (0.4, 0.0, -0.2)
-        self.assertAlmostEqual(vegetation.impostor_width(vertices), 1.0, places=6)
+        vertices[:, 0], vertices[:, 1], vertices[:, 2] = (0.3, 0.0, 0.0), (0.0, 1.0, 0.2), (0.0, 0.0, 0.0)
+        centre, radius = vegetation_impostors.sphere(vertices)
+        self.assertAlmostEqual(centre, 0.5, places=6)
+        self.assertAlmostEqual(radius, np.hypot(0.3, 0.5) * vegetation_impostors.RADIUS_MARGIN, places=5)
 
     def test_crowns_normals_point_out(self):
         for name in vegetation.near_trees() + ["bush"]:
