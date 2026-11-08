@@ -16,8 +16,10 @@
 // diffuse of the base colour less the metal; the sky probe (sky_probe.glsl)
 // lights it from everywhere else: its harmonics' irradiance on the diffuse,
 // and its level for the roughness along the reflected view times the
-// split-sum table's scale and bias of F0 (brdfLut) on the specular. The
-// local lights (lights.glsl) light its diffuse colour.
+// split-sum table's scale and bias of F0 (brdfLut) on the specular, both
+// times the share of the sky it sees at the nearest site (site_probes.glsl's
+// siteSkyShare, the reflection's along the reflected view), at least
+// SKY_SHARE_FLOOR. The local lights (lights.glsl) light its diffuse colour.
 //
 
 #define CAMERA_SET 0
@@ -29,6 +31,7 @@
 #include "shadow.glsl"
 #include "clouds.glsl"
 #include "sky_probe.glsl"
+#include "site_probes.glsl"
 
 layout(push_constant) uniform PushConstants {
     mat4 model;
@@ -54,6 +57,7 @@ layout(set = 1, binding = 2) uniform sampler2D normalMap;
 layout(set = 1, binding = 3) uniform sampler2D metallicRoughnessMap;
 
 const float MIN_ROUGHNESS = 0.04;
+const float SKY_SHARE_FLOOR = 0.15;   // of the sky light where none of the sky is seen: the light it gets back
 
 // `normal` tilted by the normal map's texel `t` (tangent space, its slopes
 // times `scale`), in the frame the position's and `uv`'s screen-space
@@ -113,8 +117,11 @@ void main() {
 
     // The sky probe.
     vec2 split = texture(brdfLut, vec2(nv, roughness)).rg;
-    vec3 reflected = skyReflection(reflect(-view, normal), roughness) * (f0 * split.x + split.y);
-    vec3 ambient = diffuse / ATMOSPHERE_PI * skyIrradiance(normal);
+    vec3 mirror = reflect(-view, normal);
+    float seen = mix(SKY_SHARE_FLOOR, 1.0, siteSkyShare(fragRelativePos, normal));
+    float seenAlong = mix(SKY_SHARE_FLOOR, 1.0, siteSkyShare(fragRelativePos, mirror));
+    vec3 reflected = skyReflection(mirror, roughness) * (f0 * split.x + split.y) * seenAlong;
+    vec3 ambient = diffuse / ATMOSPHERE_PI * skyIrradiance(normal) * seen;
 
     outColor = vec4(direct + ambient + reflected + localLights(diffuse, fragRelativePos, normal, false), 1.0);
 }

@@ -77,6 +77,18 @@ layout(set = CAMERA_SET, binding = 11) uniform sampler2D skySh;
 layout(set = CAMERA_SET, binding = 12) uniform sampler2D brdfLut;
 #define SKY_PROBE_SAMPLERS
 
+// The nearest site's sky visibility (site_probes.glsl): its frame and grid,
+// and its probes.
+layout(set = CAMERA_SET, binding = 13) uniform SiteProbeParams {
+    vec4 origin;           // xyz: the site's centre relative to the camera (m); w: 1 with a site, 0 without
+    vec4 east;             // xyz: the site frame's axes in planet space
+    vec4 up;
+    vec4 north;
+    vec4 gridMin;          // xyz: the grid's least corner in the site's frame (m)
+    vec4 spacing;          // xyz: between probes (m)
+} site;
+layout(set = CAMERA_SET, binding = 14) uniform sampler2D siteVisibility;
+
 // The sun's shadow cascades (shadows.py, shadow.glsl): the map, one layer
 // per cascade, and how to reach it.
 layout(set = CAMERA_SET, binding = 5) uniform sampler2DArrayShadow sunShadowMap;

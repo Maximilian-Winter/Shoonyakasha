@@ -248,7 +248,7 @@ import flight
 import cockpit
 from instruments import Instruments
 import outposts
-from outposts import Pads, Survey, home_outpost
+from outposts import Pads, Survey, base_probes, home_outpost
 from rocks import Rocks
 from scanner import CONTACT, Scanner
 import clock
@@ -535,6 +535,8 @@ def build_site():
         engine.scene.set_material_float(entity, "gridStrength", 0.0)
         engine.scene.set_render_layer_mask(entity, 1)
         blocks.append((entity, add(scale(east, e), add(scale(up, u), scale(north, n)))))
+    base_probes(world, [(centre, size) for centre, size, _ in pieces],
+                lambda: (world.site_ground(), world.site_frame()[2], world.site_frame()[1], world.site_frame()[3]))
 
 
 def cockpit_view():
@@ -1299,6 +1301,7 @@ def update_outposts():
     world.end_survey()
     state["survey"] = None
     pads.build(state["outposts"], tuple(planet.terrain["seed"]))
+    pads.register_probes(world)
     print("[planet] outposts: %s" % ", ".join(
         "%s on the %s (%.0f m)" % (o.name, o.body.name, o.height) for o in state["outposts"][1:]), flush=True)
 

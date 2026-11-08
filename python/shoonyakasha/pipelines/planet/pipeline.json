@@ -412,6 +412,25 @@
       "elementCount": 9,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
+    "SiteProbeParams": {
+      "usage": "uniform_buffer",
+      "packing": "std140",
+      "updateFrequency": "per_frame",
+      "fields": [
+        { "name": "origin", "type": "vec4", "source": "scene.custom.planet.siteProbes.origin",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "east", "type": "vec4", "source": "scene.custom.planet.siteProbes.east",
+          "default": [ 1.0, 0.0, 0.0, 0.0 ] },
+        { "name": "up", "type": "vec4", "source": "scene.custom.planet.siteProbes.up",
+          "default": [ 0.0, 1.0, 0.0, 0.0 ] },
+        { "name": "north", "type": "vec4", "source": "scene.custom.planet.siteProbes.north",
+          "default": [ 0.0, 0.0, 1.0, 0.0 ] },
+        { "name": "gridMin", "type": "vec4", "source": "scene.custom.planet.siteProbes.gridMin",
+          "default": [ 0.0, 0.0, 0.0, 0.0 ] },
+        { "name": "spacing", "type": "vec4", "source": "scene.custom.planet.siteProbes.spacing",
+          "default": [ 1.0, 1.0, 1.0, 0.0 ] }
+      ]
+    },
     "MaterialPushConstants": {
       "usage": "push_constant",
       "packing": "scalar",
@@ -482,7 +501,11 @@
         { "binding": 11, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "skySh",
           "autoBindResource": "skySh", "autoBindSampler": "nearestClamp" },
         { "binding": 12, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "brdfLut",
-          "externalImage": "brdfLut", "autoBindSampler": "linearClamp" }
+          "externalImage": "brdfLut", "autoBindSampler": "linearClamp" },
+        { "binding": 13, "type": "uniform_buffer", "stages": [ "fragment" ], "name": "SiteProbeParams",
+          "autoBindBuffer": "SiteProbeParams" },
+        { "binding": 14, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "siteVisibility",
+          "externalImage": "siteVisibility", "autoBindSampler": "nearestClamp" }
       ]
     },
     "cloudPassSet": {

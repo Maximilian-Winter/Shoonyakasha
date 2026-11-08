@@ -152,14 +152,20 @@ vec3 groundLightAt(vec3 p, vec3 radial) {
 
 // The radiance of a diffuse (Lambert) surface at `p` (planet space) with
 // `albedo`, facing `normal`, where up is `radial`, with `sunShare` of the
-// sunlight reaching it (1 lit, 0 in shadow): the sun, the sky over the
-// share of the sky the normal faces (0.5 + 0.5 cos) and the ground's light
-// over the rest.
-vec3 lightSurface(vec3 albedo, vec3 p, vec3 normal, vec3 radial, float sunShare) {
+// sunlight reaching it (1 lit, 0 in shadow) and `skyShare` of the sky and
+// the ground's light: the sun, the sky over the share of the sky the
+// normal faces (0.5 + 0.5 cos) and the ground's light over the rest.
+vec3 lightSurfaceSeeing(vec3 albedo, vec3 p, vec3 normal, vec3 radial, float sunShare, float skyShare) {
     float sunCos = max(dot(normal, atmosphere.sun.xyz), 0.0);
     float up = dot(normal, radial);
-    return albedo / ATMOSPHERE_PI * (sunlightAt(p) * sunCos * sunShare + skylightAt(p, radial) * (0.5 + 0.5 * up)
-                                     + groundLightAt(p, radial) * (0.5 - 0.5 * up));
+    return albedo / ATMOSPHERE_PI * (sunlightAt(p) * sunCos * sunShare
+                                     + skyShare * (skylightAt(p, radial) * (0.5 + 0.5 * up)
+                                                   + groundLightAt(p, radial) * (0.5 - 0.5 * up)));
+}
+
+// lightSurfaceSeeing with all of the sky.
+vec3 lightSurface(vec3 albedo, vec3 p, vec3 normal, vec3 radial, float sunShare) {
+    return lightSurfaceSeeing(albedo, p, normal, radial, sunShare, 1.0);
 }
 #endif
 

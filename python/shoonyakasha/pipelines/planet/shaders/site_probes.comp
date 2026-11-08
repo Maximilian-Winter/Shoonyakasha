@@ -1,0 +1,77 @@
+#version 450
+//
+// A site's sky visibility (shoonyakasha.planet.site_probes), run once per
+// site: per invocation one probe of the grid (x across, y * counts.z + z
+// down), at gridMin + (index + 0.5) * spacing in the site's frame (x east,
+// y up, z north). RAYS directions spread evenly over the sphere (a
+// Fibonacci spiral) are traced against every triangle of the site (both
+// sides); a direction is visible when it hits none nearer than its hit on
+// the ground (y = 0) or hits one only below GROUND_LEVEL (a pad lying on
+// the ground: the ground's light, as the sky probe's, stands for it). A probe is inside the
+// geometry when more than INSIDE of its rays first hit a triangle's back
+// (its normal facing along the ray); it is written as zeros. Otherwise its
+// visibility projected onto L1 spherical harmonics: (L00, L1 along x, y, z),
+// each the sum over the rays of the visibility times the basis times 4 pi
+// over RAYS.
+//
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(std430, set = 0, binding = 0) readonly buffer Corners { vec4 p[]; } corners;    // three per triangle
+layout(std430, set = 0, binding = 1) readonly buffer Normals { vec4 n[]; } normals;    // one per triangle
+layout(std430, set = 0, binding = 2) writeonly buffer Probes { vec4 v[]; } probes;
+
+layout(push_constant) uniform Push {
+    uvec4 counts;       // x, y, z probes; w: triangles
+    vec4 gridMin;       // xyz: the grid's least corner (m)
+    vec4 spacing;       // xyz: between probes (m)
+} push;
+
+const int RAYS = 96;
+const float INSIDE = 0.25;
+const float GROUND_LEVEL = 0.3;     // m
+const float PI = 3.14159265358979;
+
+void main() {
+    uint x = gl_GlobalInvocationID.x, row = gl_GlobalInvocationID.y;
+    if (x >= push.counts.x || row >= push.counts.y * push.counts.z) return;
+    uint y = row / push.counts.z, z = row % push.counts.z;
+    vec3 origin = push.gridMin.xyz + (vec3(x, y, z) + 0.5) * push.spacing.xyz;
+
+    vec4 sum = vec4(0.0);
+    int backs = 0;
+    for (int r = 0; r < RAYS; ++r) {
+        float h = 1.0 - 2.0 * (float(r) + 0.5) / float(RAYS);
+        float ring = sqrt(max(1.0 - h * h, 0.0));
+        float phi = float(r) * 2.39996323;
+        vec3 d = vec3(ring * cos(phi), h, ring * sin(phi));
+        float nearest = 1e30;
+        bool back = false;
+        for (uint t = 0u; t < push.counts.w; ++t) {
+            vec3 a = corners.p[3u * t].xyz, b = corners.p[3u * t + 1u].xyz, c = corners.p[3u * t + 2u].xyz;
+            vec3 e1 = b - a, e2 = c - a;
+            vec3 q = cross(d, e2);
+            float det = dot(e1, q);
+            if (abs(det) < 1e-9) continue;
+            float inv = 1.0 / det;
+            vec3 s = origin - a;
+            float u = dot(s, q) * inv;
+            if (u < 0.0 || u > 1.0) continue;
+            vec3 w = cross(s, e1);
+            float v = dot(d, w) * inv;
+            if (v < 0.0 || u + v > 1.0) continue;
+            float dist = dot(e2, w) * inv;
+            if (dist > 1e-4 && dist < nearest && origin.y + d.y * dist >= GROUND_LEVEL) {
+                nearest = dist;
+                back = dot(normals.n[t].xyz, d) > 0.0;
+            }
+        }
+        if (nearest < 1e30) {
+            if (back) ++backs;
+            continue;
+        }
+        sum += vec4(0.282095, 0.488603 * d);
+    }
+    uint at = row * push.counts.x + x;
+    probes.v[at] = float(backs) > INSIDE * float(RAYS) ? vec4(0.0) : sum * (4.0 * PI / float(RAYS));
+}

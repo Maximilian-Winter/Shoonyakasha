@@ -74,6 +74,17 @@ both bodies are scattered on the GPU each frame (vegetation_scatter.comp,
 grass_scatter.comp); `taken_rocks` (rocks.TakenRocks) holds the cells
 whose rocks the scatter leaves out. With `scans`, the prepared scans
 (scans.py) grow among them within SCAN_RANGE on the planet.
+
+Sites' sky visibility: `add_site_probes(key, triangles, frame)` bakes a
+site's probes from its static triangles in its frame (site_probes.py's
+cached_bake, on the engine's compute context) and keeps them with
+`frame`, a function giving the site's centre in planet space and its
+east, up and north. Each frame (upload_site_probes) the site whose centre
+is nearest the camera, within SITE_PROBE_REACH, is handed to the pipeline:
+its probes to "siteVisibility" when it is another site than the frame
+before's, and its frame relative to the camera to SiteProbeParams; with
+none near, SiteProbeParams' origin.w is 0 and every surface sees all of
+the sky.
 """
 
 import math
@@ -82,8 +93,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import brdf_lut, cube_sphere, ground_textures, orbits, scans, shadows, vegetation, vegetation_impostors
-from . import vegetation_textures
+from . import brdf_lut, cube_sphere, ground_textures, orbits, scans, shadows, site_probes, vegetation
+from . import vegetation_impostors, vegetation_textures
 from . import rivers as river_tools
 from . import wind as wind_field
 from .rocks import TakenRocks
@@ -135,6 +146,8 @@ SCATTER_SHADOW = 100.0
 # Temporal anti-aliasing (taa.frag): the jitter's cycle in frames, and how far (m) the camera may move in
 # one frame before the history is dropped (a jump, not a flight).
 TAA_JITTER_FRAMES = 8
+# The sites' sky visibility (add_site_probes): how far (m) from a site's centre the camera takes its probes.
+SITE_PROBE_REACH = 400.0
 TAA_RESET_DISTANCE = 5_000.0
 # The grass (grass_scatter.comp): candidate cells per cube face side (1.2 m on the planet), tufts at
 # most (after the other kinds' instances; matches VegetationInstances), and its range (m).
@@ -602,6 +615,8 @@ class PlanetWorld:
         self.exposure = EXPOSURE
         self.exposure_scale = 1.0
         self.lights = []                   # the local lights (Light), drawn each frame (upload_lights)
+        self.site_probes = {}              # key: (probes, frame), add_site_probes
+        self.site_probes_shown = None      # the key of the site whose probes the pipeline holds
         self.lights_drawn = 0
         self.shadows = True
         self.clouds = True
@@ -807,6 +822,8 @@ class PlanetWorld:
         procedural colours. Also hand it the GGX split-sum table (brdf_lut.py)."""
         self.engine.set_pipeline_image_data("brdfLut", brdf_lut.rgba16(brdf_lut.table(self.engine.compute)),
                                             format="R16G16B16A16_SFLOAT")
+        self.engine.set_pipeline_image_data("siteVisibility", np.zeros((1, 1, 4), np.float16),
+                                            format="R16G16B16A16_SFLOAT")
         means = ground_textures.load(self.engine)
         self.ground_textures = means is not None
         if means is None:
@@ -985,6 +1002,38 @@ class PlanetWorld:
         engine.set_custom_vec4("planet.atmosphere.settings",
                                (OZONE_HALF_WIDTH, 1.0 if self.multiple_scattering else 0.0, 0.0, 0.0))
         self.physics.density_factor = density
+
+    def add_site_probes(self, key, triangles, frame):
+        """Bake a site's probes from its static `triangles` ((N, 3, 3), its frame: x east, y up, z north,
+        metres) and keep them under `key` with `frame` (giving its centre in planet space, east, up,
+        north)."""
+        self.site_probes[key] = (site_probes.cached_bake(triangles, self.engine.compute), frame)
+        if self.site_probes_shown == key:
+            self.site_probes_shown = None
+
+    def upload_site_probes(self, camera):
+        """The nearest site's probes and frame within SITE_PROBE_REACH of `camera`, else none."""
+        engine = self.engine
+        nearest, best = None, SITE_PROBE_REACH
+        for key, (_, frame) in self.site_probes.items():
+            distance = length(sub(frame()[0], camera))
+            if distance < best:
+                nearest, best = key, distance
+        if nearest is None:
+            engine.set_custom_vec4("planet.siteProbes.origin", (0.0, 0.0, 0.0, 0.0))
+            return
+        probes, frame = self.site_probes[nearest]
+        if nearest != self.site_probes_shown:
+            engine.set_pipeline_image_data("siteVisibility", np.ascontiguousarray(probes.astype(np.float16)),
+                                           format="R16G16B16A16_SFLOAT")
+            self.site_probes_shown = nearest
+        centre, east, up, north = frame()
+        engine.set_custom_vec4("planet.siteProbes.origin", sub(centre, camera) + (1.0,))
+        engine.set_custom_vec4("planet.siteProbes.east", tuple(east) + (0.0,))
+        engine.set_custom_vec4("planet.siteProbes.up", tuple(up) + (0.0,))
+        engine.set_custom_vec4("planet.siteProbes.north", tuple(north) + (0.0,))
+        engine.set_custom_vec4("planet.siteProbes.gridMin", site_probes.GRID_MIN + (0.0,))
+        engine.set_custom_vec4("planet.siteProbes.spacing", site_probes.SPACING + (0.0,))
 
     def upload_lights(self, camera):
         """Of `lights` (Light), the MAX_LIGHTS nearest `camera` that reach
@@ -1400,6 +1449,7 @@ class PlanetWorld:
         self.update_level_of_detail(patch)
         self.engine.set_custom_vec4("planet.cameraFromCentre", position + (0.0,))
         self.upload_lights(position)
+        self.upload_site_probes(position)
         self.upload_drawn_chunks()
         self.upload_vegetation()
         self.upload_climate()
