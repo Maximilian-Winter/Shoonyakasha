@@ -1,7 +1,11 @@
 // A water surface's colour, for the ocean and the lakes (ocean.frag,
 // lake.frag), premultiplied: the colour is added and what lies under the
 // water is kept by one minus the alpha. Light reflected by the surface
-// (Schlick Fresnel, water's F0 of 0.02) shows the sky and the sun; light
+// (Schlick Fresnel, water's F0 of 0.02) shows the sky and the sun, the sky
+// as the sky probe's light along the reflected view (sky_probe.glsl),
+// giving way to the sky light over pi as the camera climbs from
+// PROBE_HEIGHTS.x to PROBE_HEIGHTS.y above the ground (the probe sees the
+// sky from the camera); light
 // that enters shows the water's colour, more of it the more water the view
 // crosses down to the ground under it. Small ripples, moving with time, tilt
 // the normal; they fade out with distance, and the sun's highlight widens
@@ -9,6 +13,8 @@
 // RIPPLE_FADE and FAR_DISTANCE), standing for waves too small to see.
 //
 // Include after camera.glsl, terrain.glsl, atmosphere.glsl, shadow.glsl and clouds.glsl.
+
+#include "sky_probe.glsl"
 
 const vec3 WATER = vec3(0.010, 0.045, 0.060);   // albedo of the light scattered back out of the water
 const float CLEARNESS = 12.0;                    // metres of water that let through 1/e of the ground under it
@@ -18,6 +24,7 @@ const float RIPPLE_FADE = 3000.0;                // metres from the camera where
 const float SHININESS = 400.0;
 const float FAR_SHININESS = 30.0;
 const float FAR_DISTANCE = 20000.0;              // metres
+const vec2 PROBE_HEIGHTS = vec2(2000.0, 10000.0);  // metres
 
 vec3 rippledNormal(vec3 p, vec3 radial, float distance) {
     vec3 axis = abs(radial.y) < 0.9 ? vec3(0, 1, 0) : vec3(1, 0, 0);
@@ -52,9 +59,11 @@ vec4 waterSurface(vec3 relativePos, vec3 radial, float horizon, float waterDepth
     float opacity = 1.0 - exp(-path / CLEARNESS);
     vec3 body = WATER / ATMOSPHERE_PI * (sunlight * max(dot(radial, sunDir), 0.0) + skylight);
 
-    // Light reflected by the surface: the sky's (its radiance, taken as the
-    // sky light over pi) and the sun's highlight (normalised Blinn-Phong).
-    vec3 sky = skylight / ATMOSPHERE_PI;
+    // Light reflected by the surface: the sky's and the sun's highlight
+    // (normalised Blinn-Phong).
+    float cameraHeight = length(camera.cameraFromCentre.xyz) - atmosphere.radii.x;
+    vec3 sky = mix(skyReflection(reflect(-toCamera, normal), 0.0), skylight / ATMOSPHERE_PI,
+                   smoothstep(PROBE_HEIGHTS.x, PROBE_HEIGHTS.y, cameraHeight));
     vec3 halfway = normalize(toCamera + sunDir);
     // Geometric between the near and far shininess, so the widening is even in the exponent.
     float shininess = SHININESS * pow(FAR_SHININESS / SHININESS, smoothstep(RIPPLE_FADE, FAR_DISTANCE, distance));
