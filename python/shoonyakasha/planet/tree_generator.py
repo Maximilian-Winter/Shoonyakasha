@@ -177,8 +177,14 @@ def sway(b, t, levels):
     return min((b.level - 1 + t) / (levels - 1), 1.0)
 
 
+BASE_SHADE = 0.45      # of the bark's shade taken away where it meets the ground
+BASE_REACH = 0.08      # of the tree's height, over which that fades out
+
+
 def tube(builder, b, segments, shade, levels):
-    """A bark tube along branch `b`'s points, its rings turned along with it."""
+    """A bark tube along branch `b`'s points, its rings turned along with it,
+    each ring's shade `shade` less BASE_SHADE at the ground, fading out by
+    BASE_REACH up."""
     from .vegetation import PART_BARK
     side = perpendicular(unit(b.points[1] - b.points[0]))
     v = 0.0
@@ -191,10 +197,12 @@ def tube(builder, b, segments, shade, levels):
             v += np.linalg.norm(p - b.points[i - 1]) / (2.0 * math.pi * max(b.radii[0], 1e-3))
         ring = []
         moves = sway(b, i / (len(b.points) - 1), levels)
+        low = 1.0 - min(max(float(p[1]) / BASE_REACH, 0.0), 1.0)
+        ring_shade = shade * (1.0 - BASE_SHADE * low * low * (3.0 - 2.0 * low))
         for k in range(segments + 1):
             a = 2.0 * math.pi * k / segments
             n = math.cos(a) * side + math.sin(a) * other
-            ring.append(builder.vertex(p + r * n, n, PART_BARK, shade, (k / segments, v), moves, b.phase))
+            ring.append(builder.vertex(p + r * n, n, PART_BARK, ring_shade, (k / segments, v), moves, b.phase))
         rings.append(ring)
     for a, c in zip(rings, rings[1:]):
         for k in range(segments):

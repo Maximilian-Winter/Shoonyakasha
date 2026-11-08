@@ -211,7 +211,7 @@ def _crown(b, rng, centre, radii, cards, size, rect_names):
 def _bush():
     rng = np.random.default_rng(11)
     b = _Builder()
-    _crown(b, rng, (0.0, 0.42, 0.0), (0.55, 0.42, 0.55), 26, 0.42, ("bush",))
+    _crown(b, rng, (0.0, 0.42, 0.0), (0.55, 0.42, 0.55), 64, 0.26, ("bush",))
     return b
 
 
