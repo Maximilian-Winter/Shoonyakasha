@@ -62,11 +62,13 @@ layout(set = CAMERA_SET, binding = 2) uniform AtmosphereParams {
 } atmosphere;
 
 // The atmosphere's lookup tables (atmosphere.glsl), built each frame by the
-// TransmittanceLut and MultiScatteringLut passes.
+// TransmittanceLut, MultiScatteringLut and SkyIrradianceLut passes.
 layout(set = CAMERA_SET, binding = 3) uniform sampler2D transmittanceLut;
 layout(set = CAMERA_SET, binding = 4) uniform sampler2D multiScatteringLut;
+layout(set = CAMERA_SET, binding = 9) uniform sampler2D skyIrradianceLut;
 #define ATMOSPHERE_TRANSMITTANCE_LUT
 #define ATMOSPHERE_MULTI_SCATTERING_LUT
+#define ATMOSPHERE_SKY_IRRADIANCE_LUT
 
 // The sun's shadow cascades (shadows.py, shadow.glsl): the map, one layer
 // per cascade, and how to reach it.

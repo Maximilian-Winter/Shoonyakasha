@@ -21,7 +21,8 @@
 // the planet. A tree leans by its packed lean (vegetationLean): each point
 // moves across by the lean times its height. The fragment shader gets the part, the
 // texture's (u, v), the shade, the plant's colour (tinted from 80 % to
-// 115 %, and warmer or cooler by HUE_SPREAD; white for bark) and the plant's frame (an impostor's facing the
+// 115 %, and warmer or cooler by HUE_SPREAD, each leaf card by CARD_SPREAD
+// as well; white for bark) and the plant's frame (an impostor's facing the
 // camera), the mesh's own position and an ore rock's resource; for a
 // scan, its tangent turned with the plant and its material's cell in the
 // scans' atlas (vegetationScanCell), its shade 1.
@@ -58,6 +59,7 @@ layout(location = 12) out vec3 fragTangent;          // a scan's; zero for anyth
 layout(location = 13) flat out vec4 fragCell;        // a scan's cell in the scans' atlas
 
 const float HUE_SPREAD = 0.3;       // a plant's foliage warmer or cooler by up to half this, by its tint
+const float CARD_SPREAD = 0.3;      // a leaf card lighter or darker by up to half this, by its phase
 const float TRUNK_BEND = 0.015;     // of the height, at the top
 const float TRUNK_HZ = 0.2;
 const float BRANCH_SWAY = 0.003;    // of the height, at a branch's tip
@@ -112,6 +114,11 @@ void main() {
     float hue = fract(tint * 13.73) - 0.5;
     vec3 colour = vegetationUnpackColour(look.w) * mix(0.8, 1.15, tint)
                 * vec3(1.0 + HUE_SPREAD * hue, 1.0, 1.0 - HUE_SPREAD * hue);
+    if (part == VEGETATION_PART_CARD) {
+        float card = fract(inColour.b * 7.31) - 0.5;
+        colour *= (1.0 + CARD_SPREAD * (fract(inColour.b * 3.17) - 0.5))
+                * vec3(1.0 + 0.5 * CARD_SPREAD * card, 1.0, 1.0 - 0.5 * CARD_SPREAD * card);
+    }
     fragColour = part == VEGETATION_PART_BARK ? vec3(1.0) : colour;
     fragRelativePos = relativePos;
     fragPart = part;

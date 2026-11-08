@@ -26,8 +26,9 @@
 // by the sun wrapped FOLIAGE_WRAP past its terminator, light through it
 // where the sun is behind it (FOLIAGE_THROUGH of the sunlight on its
 // back), a glow towards the sun seen through it (FOLIAGE_GLOW), all of
-// which still reach it in shadow by FOLIAGE_LEAK, and the sky light times
-// FOLIAGE_SKY, darkened by the shade. Every part also takes the local
+// which still reach it in shadow by FOLIAGE_LEAK, the sky light times
+// FOLIAGE_SKY and the ground's light from below (atmosphere.glsl's
+// groundLightAt), both darkened by the shade. Every part also takes the local
 // lights (lights.glsl), foliage from either side.
 //
 
@@ -153,6 +154,8 @@ void main() {
     float glow = FOLIAGE_GLOW * pow(max(dot(normalize(fragRelativePos), sun), 0.0), 8.0);
     float skyCos = FOLIAGE_SKY * (0.6 + 0.4 * dot(normal, radial)) * fragShade;
     float sunReach = mix(FOLIAGE_LEAK, 1.0, sunShare);
-    vec3 light = sunlightAt(p) * sunReach * (lit + through + glow) + skylightAt(p, radial) * skyCos;
+    float groundCos = (0.4 - 0.4 * dot(normal, radial)) * fragShade;
+    vec3 light = sunlightAt(p) * sunReach * (lit + through + glow) + skylightAt(p, radial) * skyCos
+               + groundLightAt(p, radial) * groundCos;
     outColor = vec4(albedo / ATMOSPHERE_PI * light + localLights(albedo, fragRelativePos, normal, true), 1.0);
 }

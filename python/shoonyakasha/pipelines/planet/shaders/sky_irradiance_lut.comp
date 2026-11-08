@@ -1,0 +1,106 @@
+#version 450
+//
+// The sky's light on a level surface (atmosphere.glsl's skylightAt): per
+// texel, a point at the texel's height with the sun at its zenith cosine,
+// laid out as the multiple scattering table (multiScatteringLutUv). Over
+// DIRECTIONS_SIDE x DIRECTIONS_SIDE directions spread over the upper
+// hemisphere by the cosine of their zenith angle, a ray from the point to
+// the top of the atmosphere (or the ground) gathers the sunlight scattered
+// once towards the point (by air and haze, with their phase functions)
+// and, weighted by atmosphere.settings.y, the light scattered more than
+// once from the multiple scattering table. Below the cloud layer's top
+// (fading out through the layer) the clouds' coverage c takes c of that
+// clear sky and gives CLOUD_LIGHT of the sunlight on level ground in its
+// place, white. The texel holds the light that reaches a surface facing
+// up, per unit of the sun's illuminance.
+//
+
+layout(local_size_x = 8, local_size_y = 8) in;
+
+layout(set = 0, binding = 0) uniform AtmosphereParams {
+    vec4 radii;
+    vec4 rayleigh;
+    vec4 mie;
+    vec4 sun;
+    vec4 ozone;
+    vec4 settings;
+} atmosphere;
+
+layout(set = 0, binding = 1) uniform sampler2D transmittanceLut;
+layout(set = 0, binding = 2) uniform sampler2D multiScatteringLut;
+layout(set = 0, binding = 3, rgba16f) uniform writeonly image2D skyIrradianceImage;
+layout(set = 0, binding = 4) uniform CloudParams {
+    vec4 layer;      // bottom, top (m), coverage (0 none .. 1 overcast), extinction per metre
+    vec4 shape;      // w: 1 with clouds, 0 without
+    vec4 wind;
+    vec4 storm;
+    vec4 stormShape;
+} clouds;
+
+#include "atmosphere.glsl"
+
+const int DIRECTIONS_SIDE = 12;
+const int STEPS = 24;
+const float CLOUD_LIGHT = 0.4;      // of the sunlight on level ground, what the clouds pass down where they cover the sky
+
+// Transmittance from `p` to space along the unit direction `toward`: 0
+// where the planet is in the way.
+vec3 transmittanceToward(vec3 p, vec3 toward) {
+    vec2 hit = raySphere(p, toward, atmosphere.radii.x);
+    if (hit.y > 0.0 && hit.x > 0.0) return vec3(0.0);
+    float r = length(p);
+    return texture(transmittanceLut, transmittanceLutUv(max(r, atmosphere.radii.x), dot(p, toward) / r)).rgb;
+}
+
+void main() {
+    ivec2 texel = ivec2(gl_GlobalInvocationID.xy);
+    if (any(greaterThanEqual(texel, MULTI_SCATTERING_SIZE))) return;
+    vec2 uv = vec2(texel) / vec2(MULTI_SCATTERING_SIZE - 1);
+    float sunMu = uv.x * 2.0 - 1.0;
+    float bottom = atmosphere.radii.x, top = atmosphere.radii.y;
+    float r = clamp(bottom + uv.y * (top - bottom), bottom + 1.0, top - 1.0);
+    vec3 p = vec3(0.0, r, 0.0);
+    vec3 sun = vec3(sqrt(max(1.0 - sunMu * sunMu, 0.0)), sunMu, 0.0);
+    float g = atmosphere.rayleigh.w;
+
+    vec3 irradiance = vec3(0.0);
+    for (int a = 0; a < DIRECTIONS_SIDE; ++a) {
+        for (int b = 0; b < DIRECTIONS_SIDE; ++b) {
+            // Cosine-weighted: the directions' mean radiance times pi is the irradiance.
+            float u = (float(a) + 0.5) / float(DIRECTIONS_SIDE);
+            float sinTheta = sqrt(u), cosTheta = sqrt(1.0 - u);
+            float phi = 2.0 * ATMOSPHERE_PI * (float(b) + 0.5) / float(DIRECTIONS_SIDE);
+            vec3 rd = vec3(sinTheta * cos(phi), cosTheta, sinTheta * sin(phi));
+            float mu = dot(rd, sun);
+
+            vec2 ground = raySphere(p, rd, bottom);
+            bool hitsGround = ground.y > 0.0 && ground.x > 0.0;
+            float distance = hitsGround ? ground.x : max(raySphere(p, rd, top).y, 0.0);
+            float dt = distance / float(STEPS);
+
+            vec3 throughput = vec3(1.0), radiance = vec3(0.0);
+            for (int s = 0; s < STEPS; ++s) {
+                vec3 x = p + rd * (dt * (float(s) + 0.5));
+                float rx = length(x);
+                vec3 density = airDensity(x);
+                vec3 rayleigh = atmosphere.rayleigh.rgb * density.x;
+                float mie = atmosphere.mie.x * density.y;
+                vec3 extinct = max(extinction(density), vec3(1e-12));
+                vec3 stepTransmittance = exp(-extinct * dt);
+                vec3 integral = (1.0 - stepTransmittance) / extinct;
+                vec3 single = (rayleigh * rayleighPhase(mu) + mie * miePhase(mu, g)) * transmittanceToward(x, sun);
+                vec3 multiple = texture(multiScatteringLut, multiScatteringLutUv(rx, dot(x, sun) / rx)).rgb
+                              * (rayleigh + mie) * atmosphere.settings.y;
+                radiance += throughput * integral * (single + multiple);
+                throughput *= stepTransmittance;
+            }
+            irradiance += radiance;
+        }
+    }
+    irradiance *= ATMOSPHERE_PI / float(DIRECTIONS_SIDE * DIRECTIONS_SIDE);
+    float h = r - bottom;
+    float cover = clouds.shape.w * clouds.layer.z * (1.0 - smoothstep(clouds.layer.x, clouds.layer.y, h));
+    vec3 cloudLight = CLOUD_LIGHT * transmittanceToward(p, sun) * max(sunMu, 0.0);
+    irradiance = mix(irradiance, cloudLight, cover);
+    imageStore(skyIrradianceImage, texel, vec4(irradiance, 1.0));
+}
