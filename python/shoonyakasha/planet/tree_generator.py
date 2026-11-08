@@ -177,8 +177,14 @@ def sway(b, t, levels):
     return min((b.level - 1 + t) / (levels - 1), 1.0)
 
 
+BASE_SHADE = 0.45      # of the bark's shade taken away where it meets the ground
+BASE_REACH = 0.08      # of the tree's height, over which that fades out
+
+
 def tube(builder, b, segments, shade, levels):
-    """A bark tube along branch `b`'s points, its rings turned along with it."""
+    """A bark tube along branch `b`'s points, its rings turned along with it,
+    each ring's shade `shade` less BASE_SHADE at the ground, fading out by
+    BASE_REACH up."""
     from .vegetation import PART_BARK
     side = perpendicular(unit(b.points[1] - b.points[0]))
     v = 0.0
@@ -191,10 +197,12 @@ def tube(builder, b, segments, shade, levels):
             v += np.linalg.norm(p - b.points[i - 1]) / (2.0 * math.pi * max(b.radii[0], 1e-3))
         ring = []
         moves = sway(b, i / (len(b.points) - 1), levels)
+        low = 1.0 - min(max(float(p[1]) / BASE_REACH, 0.0), 1.0)
+        ring_shade = shade * (1.0 - BASE_SHADE * low * low * (3.0 - 2.0 * low))
         for k in range(segments + 1):
             a = 2.0 * math.pi * k / segments
             n = math.cos(a) * side + math.sin(a) * other
-            ring.append(builder.vertex(p + r * n, n, PART_BARK, shade, (k / segments, v), moves, b.phase))
+            ring.append(builder.vertex(p + r * n, n, PART_BARK, ring_shade, (k / segments, v), moves, b.phase))
         rings.append(ring)
     for a, c in zip(rings, rings[1:]):
         for k in range(segments):
@@ -272,7 +280,7 @@ SPECIES = {
     "broadleaf_a": Species(             # a round crown
         "broadleaf_a",
         [Level(sections=4, segments=8, taper=0.6, gnarliness=0.06),
-         Level(children=6, start=0.42, angle=48.0, length=0.48, radius=0.5, shorten=0.3, taper=0.45,
+         Level(children=6, start=0.3, angle=48.0, length=0.48, radius=0.5, shorten=0.3, taper=0.45,
                gnarliness=0.18, sections=3, segments=5),
          Level(children=5, start=0.25, angle=40.0, length=0.5, radius=0.55, taper=0.4, gnarliness=0.25,
                sections=2, segments=3)],
@@ -281,7 +289,7 @@ SPECIES = {
     "broadleaf_b": Species(             # a tall oval crown
         "broadleaf_b",
         [Level(sections=4, segments=8, taper=0.5, gnarliness=0.05),
-         Level(children=7, start=0.38, angle=30.0, length=0.45, radius=0.5, shorten=0.5, taper=0.45,
+         Level(children=7, start=0.28, angle=30.0, length=0.45, radius=0.5, shorten=0.5, taper=0.45,
                gnarliness=0.15, sections=3, segments=5),
          Level(children=4, start=0.25, angle=35.0, length=0.45, radius=0.55, taper=0.4, gnarliness=0.25,
                sections=2, segments=3)],

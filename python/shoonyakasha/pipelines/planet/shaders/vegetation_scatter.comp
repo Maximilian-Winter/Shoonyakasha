@@ -105,7 +105,10 @@ const float FADE_START = 0.85;      // of the range: where heights start to shri
 const float MAX_TREE_CHANCE = 0.97;
 // Forests' edges (forestEdges): where the cover crosses from clearing to forest, at beaches and at the
 // treeline, the trees' chance falls by EDGE_TREES and the bushes' rises by EDGE_BUSHES times the edge (0 .. 1),
-// and YOUNG_SHARE of the edge's trees are young, YOUNG_SIZE of their height. Trees near the treeline (the
+// and YOUNG_SHARE of the edge's trees are young, YOUNG_SIZE of their height (YOUNG_ANYWHERE of that share
+// away from edges). Trees gather in clumps: a noise CLUMP_WAVELENGTH m across scales the trees' chance (after
+// MAX_TREE_CHANCE) from CLUMP_TREES.x to CLUMP_TREES.y and the bushes' from CLUMP_BUSHES.x to CLUMP_BUSHES.y, so the bushes fill
+// the gaps between the clumps. Trees near the treeline (the
 // tundra's weight, its temperature wavered by TREELINE_WAVER degrees over TREELINE_WAVELENGTH m) are STUNT of
 // it shorter. Dry ground (moisture DRY_MOISTURE down to none) turns DRY_SHARE of foliage towards DRY_FOLIAGE.
 // A tree leans downhill by LEAN_PER_SLOPE times the slope's sine (at most VEGETATION_LEAN_MOST) and stands
@@ -114,6 +117,10 @@ const float EDGE_TREES = 0.25;
 const float EDGE_BUSHES = 2.0;
 const float YOUNG_SHARE = 0.5;
 const vec2 YOUNG_SIZE = vec2(0.4, 0.7);
+const float YOUNG_ANYWHERE = 0.25;
+const float CLUMP_WAVELENGTH = 40.0;
+const vec2 CLUMP_TREES = vec2(0.25, 1.3);
+const vec2 CLUMP_BUSHES = vec2(1.6, 0.6);
 const int YOUNG_SALT = 3072;        // the hash of a tree's youth, apart from every other draw
 const float TREELINE_WAVER = 1.5;
 const float TREELINE_WAVELENGTH = 300.0;
@@ -289,10 +296,23 @@ uint rockResource(int body, vec3 radial, vec3 climate, float ore) {
     return body == 1 ? moonResource(radial) : planetResource(radial, climate.x, climate.y);
 }
 
-// A rock's colour: the body's rock colour, an ore rock's mixed towards its
-// resource's tint by ORE_TINT_SHARE times 1 + its richness, and VEGETATION_ORE.
-float packedRockColour(int body, float ore, uint resourceId) {
+// A rock's colour: the body's rock colour (on the planet ROCK_SOIL of the
+// way towards its biomes' soil at `climate`, times ROCK_SHADE), an ore
+// rock's mixed towards its resource's tint by ORE_TINT_SHARE times 1 + its
+// richness, and VEGETATION_ORE.
+const float ROCK_SOIL = 0.4;
+const float ROCK_SHADE = 0.65;
+
+float packedRockColour(int body, vec3 climate, float ore, uint resourceId) {
     vec3 colour = rockColour(body);
+    if (body == 0) {
+        vec3 c = climateWithSettings(climate);
+        float biomes[BIOMES];
+        biomeWeights(c.x, c.y, biomes);
+        vec3 soil = vec3(0.0);
+        for (int b = 0; b < BIOMES; ++b) soil += biomes[b] * biomeSoil(b);
+        colour = mix(colour, soil, ROCK_SOIL) * ROCK_SHADE;
+    }
     float flags = body == 1 ? VEGETATION_ON_MOON : 0.0;
     if (ore > ORE_ROCKS) {
         colour = mix(colour, oreTint(resourceId), ORE_TINT_SHARE * (1.0 + ore));
@@ -458,8 +478,12 @@ void main() {
                                                                       + vec3(13.1, 2.7, 8.3)), 0.0, 0.0);
                 chances = biomePlants(radial, height, normal, wavered, leaf, grass, forms);
                 forestEdges(radial, height, normal, wavered, edge, stunt, dry);
-                treeChance = density * min(chances.x, MAX_TREE_CHANCE) * (1.0 - EDGE_TREES * edge);
-                bushChance = density * chances.z * (1.0 + EDGE_BUSHES * edge);
+                float clump = smoothstep(-0.35, 0.35, noise3(radial * (terrain.siteShape.z / CLUMP_WAVELENGTH)
+                                                          + vec3(5.3, 11.9, 2.1)));
+                treeChance = density * min(chances.x, MAX_TREE_CHANCE) * mix(CLUMP_TREES.x, CLUMP_TREES.y, clump)
+                           * (1.0 - EDGE_TREES * edge);
+                bushChance = density * chances.z * mix(CLUMP_BUSHES.x, CLUMP_BUSHES.y, clump)
+                           * (1.0 + EDGE_BUSHES * edge);
             }
             int kind;
             float colour;
@@ -504,7 +528,7 @@ void main() {
                              * smoothstep(bushRange, bushRange * FADE_START, x.distance);
                 if (size < 0.05) continue;
                 uint resourceId = rockResource(chunk.body, radial, climate, ore);
-                colour = packedRockColour(chunk.body, ore, resourceId);
+                colour = packedRockColour(chunk.body, climate, ore, resourceId);
                 place(chunk, x, kind, size, turn, tint, colour, oreGrade(ore), resourceId, vec3(0.0), 0.0);
                 continue;
             }
@@ -513,7 +537,8 @@ void main() {
             float lower = 0.0;
             if (kind < VEGETATION_TREE_KINDS) {
                 float young = float(terrainHash(ivec3(x.cell, chunk.face + YOUNG_SALT)) & 0xFFFFu) / 65536.0;
-                if (young < YOUNG_SHARE * edge) size *= mix(YOUNG_SIZE.x, YOUNG_SIZE.y, young / (YOUNG_SHARE * edge));
+                float youngShare = YOUNG_SHARE * max(edge, YOUNG_ANYWHERE);
+                if (young < youngShare) size *= mix(YOUNG_SIZE.x, YOUNG_SIZE.y, young / youngShare);
                 size *= 1.0 - STUNT * stunt;
                 vec3 downhill = normal - radial * dot(normal, radial);
                 lean = downhill * min(LEAN_PER_SLOPE * length(downhill), VEGETATION_LEAN_MOST)
@@ -564,7 +589,7 @@ void main() {
             continue;
         }
         uint resourceId = rockResource(chunk.body, radial, climate, ore);
-        place(chunk, x, KIND_ROCK, size, turn, tint, packedRockColour(chunk.body, ore, resourceId), oreGrade(ore),
+        place(chunk, x, KIND_ROCK, size, turn, tint, packedRockColour(chunk.body, climate, ore, resourceId), oreGrade(ore),
               resourceId, vec3(0.0), 0.0);
     }
 }

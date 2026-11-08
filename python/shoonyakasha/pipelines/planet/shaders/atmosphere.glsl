@@ -17,13 +17,17 @@
 // sun's angle alone. Define ATMOSPHERE_TRANSMITTANCE_LUT and declare
 // `transmittanceLut` for sunTransmittance and what uses it; define
 // ATMOSPHERE_MULTI_SCATTERING_LUT and declare `multiScatteringLut` as well
-// for atmosphereAlong.
+// for atmosphereAlong; define ATMOSPHERE_SKY_IRRADIANCE_LUT and declare
+// `skyIrradianceLut` as well for skylightAt, groundLightAt and lightSurface.
 //   - Transmittance (TRANSMITTANCE_SIZE): from a point at radius r towards
 //     the top along a direction at cosine mu from the zenith, for rays that
 //     do not meet the planet, mapped as transmittanceLutUv lays out.
 //   - Multiple scattering (MULTI_SCATTERING_SIZE): the light scattered
 //     more than once that reaches a point, per unit of scattering, by
 //     height (v) and the cosine of the sun's zenith angle (u, from -1 to 1).
+//   - Sky irradiance (laid out as the multiple scattering table): the
+//     sky's light on a level surface, per unit of the sun's illuminance
+//     (sky_irradiance_lut.comp).
 
 const float ATMOSPHERE_PI = 3.14159265358979;
 const int VIEW_STEPS = 32;
@@ -127,20 +131,35 @@ vec3 sunlightAt(vec3 p) {
     return atmosphere.mie.z * sunTransmittance(p);
 }
 
-// A rough sky light on a surface at `p` whose up is `radial`: blue, fading
-// as the sun goes below the horizon.
+#endif
+
+#if defined(ATMOSPHERE_TRANSMITTANCE_LUT) && defined(ATMOSPHERE_SKY_IRRADIANCE_LUT)
+const float GROUND_BOUNCE = 0.15;   // the ground's albedo, for the light it sends back up
+
+// The sky's light (illuminance per colour) on a level surface at `p` whose
+// up is `radial`, from the sky irradiance table.
 vec3 skylightAt(vec3 p, vec3 radial) {
-    float day = smoothstep(-0.15, 0.25, dot(radial, atmosphere.sun.xyz));
-    return atmosphere.mie.z * vec3(0.025, 0.045, 0.08) * day;
+    float r = max(length(p), atmosphere.radii.x);
+    return atmosphere.mie.z * texture(skyIrradianceLut, multiScatteringLutUv(r, dot(radial, atmosphere.sun.xyz))).rgb;
+}
+
+// The light the ground around `p` sends up (illuminance per colour on a
+// surface facing down): GROUND_BOUNCE of the sunlight and sky light on
+// level ground.
+vec3 groundLightAt(vec3 p, vec3 radial) {
+    return GROUND_BOUNCE * (sunlightAt(p) * max(dot(radial, atmosphere.sun.xyz), 0.0) + skylightAt(p, radial));
 }
 
 // The radiance of a diffuse (Lambert) surface at `p` (planet space) with
 // `albedo`, facing `normal`, where up is `radial`, with `sunShare` of the
-// sunlight reaching it (1 lit, 0 in shadow).
+// sunlight reaching it (1 lit, 0 in shadow): the sun, the sky over the
+// share of the sky the normal faces (0.5 + 0.5 cos) and the ground's light
+// over the rest.
 vec3 lightSurface(vec3 albedo, vec3 p, vec3 normal, vec3 radial, float sunShare) {
     float sunCos = max(dot(normal, atmosphere.sun.xyz), 0.0);
-    float skyCos = 0.5 + 0.5 * dot(normal, radial);
-    return albedo / ATMOSPHERE_PI * (sunlightAt(p) * sunCos * sunShare + skylightAt(p, radial) * skyCos);
+    float up = dot(normal, radial);
+    return albedo / ATMOSPHERE_PI * (sunlightAt(p) * sunCos * sunShare + skylightAt(p, radial) * (0.5 + 0.5 * up)
+                                     + groundLightAt(p, radial) * (0.5 - 0.5 * up));
 }
 #endif
 

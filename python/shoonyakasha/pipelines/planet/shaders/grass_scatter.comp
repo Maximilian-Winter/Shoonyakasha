@@ -7,12 +7,16 @@
 // vegetation.grass.z x grass.z cells (about 1.2 m at 131,072). A candidate
 // is kept by a draw from its cell's hash against the biomes' grass chance
 // there (biome.glsl's biomePlants), times vegetation.settings.w, none on
-// beaches, rock, snow or the sea floor. A tuft's mesh is scaled by 0.3 to
-// 0.7, shrinking to nothing over the last 30 % of the range, left out
-// under water (candidateWet) and by the clearings that clear grass
-// (candidateCleared), turned and tinted by
-// the hash, and coloured as its biomes' grass (the ground's plants,
-// towards straw where the biomes' grass is dry). Under trees the grass
+// beaches, rock, snow or the sea floor. A tuft's mesh is scaled by
+// GRASS_SIZE (towards its least: the draw squared), shrinking to nothing
+// over the last 30 % of the range, left out under water (candidateWet) and
+// by the clearings that clear grass (candidateCleared), turned and tinted
+// by the hash, and coloured as its biomes' grass (the ground's plants,
+// towards straw where the biomes' grass is dry); DRY_SHARE of the tufts
+// turn further towards STRAW by DRY_TURN (by the hash), keeping their
+// luminance. Within NEAR_RANGE a second grid NEAR_CELLS times as fine
+// places shorter tufts (NEAR_SIZE) in the same way, fading out over its
+// last NEAR_FADE of that range. Under trees the grass
 // thins: its chance falls by GRASS_UNDER_TREES times how likely a tree is
 // there (TREES_THIN_FULL: from none to full over the trees' chance). It takes the
 // next instance of draw VEGETATION_GRASS (vegetationFirstInstance), at most
@@ -28,23 +32,26 @@ const float GRASS_FADE_START = 0.7;     // of the range: where tufts start to sh
 const int GRASS_SALT = 8;               // tells the grass's grid from the trees' in the hash
 const float GRASS_UNDER_TREES = 0.7;
 const vec2 TREES_THIN_FULL = vec2(0.3, 0.8);
+const vec2 GRASS_SIZE = vec2(0.25, 0.85);
+const float NEAR_RANGE = 20.0;          // m
+const float NEAR_CELLS = 3.0;           // the near grid's cells per side of one of the grid's
+const int NEAR_SALT = 80;               // tells the near grid from the others in the hash
+const vec2 NEAR_SIZE = vec2(0.12, 0.35);
+const float NEAR_FADE = 0.3;
+const float DRY_SHARE = 0.25;
+const vec2 DRY_TURN = vec2(0.2, 0.55);
+const vec3 STRAW = vec3(0.36, 0.30, 0.14);
 
-void main() {
-    ScatterChunk chunk;
-    float range = vegetation.grass.y;
-    if (vegetation.settings.x == 0.0 || vegetation.grass.x == 0.0 ||
-        !scatterChunk(gl_WorkGroupID.x, GRASS_MIN_LEVEL, range, false, chunk)) return;
-    float cells = vegetation.grass.z;
+// Places the tufts of one grid: `cells` per face side within `range`, their
+// sizes from `sizes`, fading out from `fadeStart` of the range.
+void placeTufts(ScatterChunk chunk, float cells, float range, int salt, vec2 sizes, float fadeStart, float density,
+                uint first, uint capacity) {
     int cu0, cv0;
     uint across, count;
     scatterCells(chunk, cells, cu0, cv0, across, count);
-    float density = vegetation.settings.w;
-    uint capacity = uint(vegetation.grass.w);
-    uint first = vegetationFirstInstance(VEGETATION_GRASS, uint(vegetation.lod.z), uint(vegetation.grass.w));
-
     for (uint k = gl_LocalInvocationID.x; k < count; k += 64u) {
         Candidate x;
-        if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, GRASS_SALT, range, x)) continue;
+        if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, salt, range, x)) continue;
         float pick = nextRandom(x.hash);
         if (pick >= 0.95 * density) continue;                         // above the densest biome's chance
         vec3 radial, normal, climate;
@@ -54,15 +61,37 @@ void main() {
         vec4 plants = biomePlants(radial, height, normal, climate, leaf, grass, forms);
         if (pick >= density * plants.w * (1.0 - GRASS_UNDER_TREES * smoothstep(TREES_THIN_FULL.x, TREES_THIN_FULL.y,
                                                                                plants.x))) continue;
-        float size = mix(0.3, 0.7, nextRandom(x.hash)) * smoothstep(range, range * GRASS_FADE_START, x.distance);
+        float draw = nextRandom(x.hash);
+        float size = mix(sizes.x, sizes.y, draw * draw) * smoothstep(range, range * fadeStart, x.distance);
         if (size < 0.03) continue;
         if (candidateWet(chunk, radial) || candidateCleared(chunk, x, radial, CLEAR_GRASS, GRASS_SALT)) continue;
         float turn = 6.2831853 * nextRandom(x.hash);
         float tint = nextRandom(x.hash);
+        if (nextRandom(x.hash) < DRY_SHARE) {
+            float y = dot(grass, vec3(0.2126, 0.7152, 0.0722));
+            vec3 straw = STRAW * y / dot(STRAW, vec3(0.2126, 0.7152, 0.0722));
+            grass = mix(grass, straw, mix(DRY_TURN.x, DRY_TURN.y, nextRandom(x.hash)));
+        }
         vec3 drawn = candidateDrawn(chunk, x);
         uint at;
         if (!claimInstance(uint(VEGETATION_GRASS), first, capacity, at)) continue;
         instances.data[at] = vec4(drawn, size);
         instances.data[at + 1u] = vec4(cos(turn), sin(turn), tint, vegetationPackColour(grass));
+    }
+}
+
+void main() {
+    ScatterChunk chunk;
+    float range = vegetation.grass.y;
+    if (vegetation.settings.x == 0.0 || vegetation.grass.x == 0.0 ||
+        !scatterChunk(gl_WorkGroupID.x, GRASS_MIN_LEVEL, range, false, chunk)) return;
+    float cells = vegetation.grass.z;
+    float density = vegetation.settings.w;
+    uint capacity = uint(vegetation.grass.w);
+    uint first = vegetationFirstInstance(VEGETATION_GRASS, uint(vegetation.lod.z), uint(vegetation.grass.w));
+    placeTufts(chunk, cells, range, GRASS_SALT, GRASS_SIZE, GRASS_FADE_START, density, first, capacity);
+    if (chunk.nearest <= NEAR_RANGE) {
+        placeTufts(chunk, cells * NEAR_CELLS, NEAR_RANGE, NEAR_SALT, NEAR_SIZE, 1.0 - NEAR_FADE, density, first,
+                   capacity);
     }
 }

@@ -15,7 +15,8 @@
 //                            z, w: the near and far scales (m per tile)
 //
 // A layer's albedo is its procedural colour times its texture over the
-// texture's mean, near scale times far. Each scale fades out as its tiles
+// texture's mean, near scale times far, with GROUND_DETAIL_CHROMA of that
+// detail's colour (none on the moon's layer) and all its brightness. Each scale fades out as its tiles
 // shrink on the screen, from GROUND_FADE_PIXELS.x pixels across to
 // GROUND_FADE_PIXELS.y, before their repetition shows: far off the ground
 // is its procedural colour again.
@@ -42,6 +43,7 @@ layout(set = GROUND_SET, binding = 13) uniform sampler2D groundNormal5;
 layout(set = GROUND_SET, binding = 14) uniform sampler2D groundNormal6;
 
 const float GROUND_MIN_WEIGHT = 0.02;   // layers and projections below this are not sampled
+const float GROUND_DETAIL_CHROMA = 0.4; // of a texture's colour (over its mean) kept, its brightness all
 const vec2 GROUND_FADE_PIXELS = vec2(48.0, 12.0);
 
 // How much a scale's texture shows for coordinates (in tiles) changing by
@@ -135,7 +137,7 @@ void groundTextured(float weights[GROUND_LAYERS], vec3 colours[GROUND_LAYERS], v
             vec3 bumps = nearFade > 0.0 ? groundNormalTexel(i, nearPlanes[p], nearGrads[p]) : vec3(0.0, 0.0, 1.0);
             tangent[p] += w * vec3(bumps.xy * nearFade, bumps.z);
         }
-        if (i == GROUND_MOON) detail = vec3(groundLuminance(detail));
+        detail = mix(vec3(groundLuminance(detail)), detail, i == GROUND_MOON ? 0.0 : GROUND_DETAIL_CHROMA);
         textured += w * colours[i] * detail;
         total += w;
     }
