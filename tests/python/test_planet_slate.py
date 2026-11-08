@@ -91,7 +91,7 @@ class ItemsTest(unittest.TestCase):
 
     def test_icons_and_app_keys(self):
         self.assertEqual(set(slate.ICONS), {"overview", "market", "map", "contracts", "workshop", "vehicle", "log",
-                                            "system"})
+                                            "system", "debug"})
 
 
 if __name__ == "__main__":

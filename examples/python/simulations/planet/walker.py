@@ -302,8 +302,8 @@ from hud import Hud
 from viewmodel import Glows, Viewmodel
 from play.core import (RAIN_DROPS, args, blocks, bodies, box, engine, foot, outpost_bodies, pads, save_base, settings,
                        state, world)
-from play import (apps, apps_trade, checks, contracting, economy, exploring, loops, menus, music, saving, showers,
-                  site, sounds, spaceflight, storms, survival, vehicle, walking)
+from play import (apps, apps_trade, checks, contracting, debug_check, debugging, economy, exploring, loops, menus,
+                  music, saving, showers, site, sounds, spaceflight, storms, survival, vehicle, walking)
 import slate
 
 METEOR_DISCS, METEOR_STREAKS = 96, 48
@@ -320,7 +320,9 @@ def frame(dt):
     for screen in (state.ui.start, state.ui.system, state.ui.slate):
         screen.update(engine.input, elapsed)
     covered = state.ui.slate.visible   # the world runs, the player waits
-    if args.check:
+    if args.debug_check:
+        debug_check.run_debug_check(elapsed)
+    elif args.check:
         checks.run_check(elapsed)
     elif state.vehicle.driving and state.space.ship is not None and not paused and not covered:
         carview.read_space_controls(engine.input, state.space.controls, elapsed)
@@ -328,6 +330,7 @@ def frame(dt):
         vehicle.read_car_controls()
     elif foot.player is not None and not paused and not covered:
         foot.read_controls(engine.input)
+        debugging.hold_gun()
         survival.slow_down()
         walking.ignore_held_buttons()
         walking.read_bumpers()
@@ -373,6 +376,7 @@ def frame(dt):
     exploring.draw_poi_scenes(camera)
     showers.draw_showers(camera, basis)
     storms.draw_rain(camera, basis)
+    debugging.update_aim(camera, basis)
     foot.props.draw(foot.bubble, camera)
     site.place_ship(camera)
     walking.place_viewmodel(dt, camera)
@@ -414,7 +418,10 @@ def on_init():
     state.ui.map_view = MapView(engine)
     state.ui.map_view.show(False)
     state.ui.hud.on_toast = apps.log_toast
-    state.ui.slate = slate.Slate(engine, apps_trade.apps_list(), system=lambda: menus.set_paused(True))
+    state.ui.slate = slate.Slate(engine, apps_trade.apps_list() + ([debugging.Debug()] if args.debug else []),
+                                 system=lambda: menus.set_paused(True))
+    if args.debug:
+        state.ui.aim_glows = Glows(engine, 1, 0)
     state.ui.system = menus.system_screen()
     state.ui.start = menus.start_screen()
     sounds.setup(loops.LOOPS, music.MUSIC)
