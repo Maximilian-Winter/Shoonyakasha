@@ -13,7 +13,8 @@ came back. Every plant with a trunk (the trees' kinds and the
 cactus) and every rock is listed, up to CAPACITY.
 
 A `NearbyTree` is named by its cell (`key`: its body, grid, cube face and
-cell, as rocks' keys, the same every frame), with its kind
+cell, as rocks' keys, the same every frame; a grove tree's face has 8
+times its grove index added, vegetation_scatter.comp), with its kind
 (vegetation.KINDS), its base on the drawn surface, its height, its width
 factor (as vegetation.glsl's vegetationWidth, from its tint), its turn
 about its up (cosine, sine), its tint, an ore rock's grade (its ore

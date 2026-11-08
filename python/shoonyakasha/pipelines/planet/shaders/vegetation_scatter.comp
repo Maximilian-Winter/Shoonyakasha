@@ -108,7 +108,13 @@ const float MAX_TREE_CHANCE = 0.97;
 // and YOUNG_SHARE of the edge's trees are young, YOUNG_SIZE of their height (YOUNG_ANYWHERE of that share
 // away from edges). Trees gather in clumps: a noise CLUMP_WAVELENGTH m across scales the trees' chance (after
 // MAX_TREE_CHANCE) from CLUMP_TREES.x to CLUMP_TREES.y and the bushes' from CLUMP_BUSHES.x to CLUMP_BUSHES.y, so the bushes fill
-// the gaps between the clumps. Trees near the treeline (the
+// the gaps between the clumps. Within the detailed meshes' distance (vegetation.lod.x) each cell of the trees'
+// grid also has GROVE_TREES grove candidates (scatterGroves), each hashed apart (GROVE_SALT, 8 more for
+// each) and jittered over the cell, kept as a tree by a draw against GROVE_CHANCE of the trees' chance
+// where the clump noise is high (from GROVE_CLUMP.x to GROVE_CLUMP.y) and when at least GROVE_SPACING m from
+// the cell's own candidate and its earlier grove trees; it is chosen, sized and stood as any tree, its
+// variant and youth hashed apart by its index (8 times it added to their salts), and listed in
+// NearbyTrees with 8 times its index added to its face. Trees near the treeline (the
 // tundra's weight, its temperature wavered by TREELINE_WAVER degrees over TREELINE_WAVELENGTH m) are STUNT of
 // it shorter. Dry ground (moisture DRY_MOISTURE down to none) turns DRY_SHARE of foliage towards DRY_FOLIAGE.
 // A tree leans downhill by LEAN_PER_SLOPE times the slope's sine (at most VEGETATION_LEAN_MOST) and stands
@@ -118,6 +124,11 @@ const float EDGE_BUSHES = 2.0;
 const float YOUNG_SHARE = 0.5;
 const vec2 YOUNG_SIZE = vec2(0.4, 0.7);
 const float YOUNG_ANYWHERE = 0.25;
+const int GROVE_TREES = 3;
+const int GROVE_SALT = 128;
+const float GROVE_CHANCE = 0.6;
+const vec2 GROVE_CLUMP = vec2(0.55, 0.95);
+const float GROVE_SPACING = 2.5;   // m
 const float CLUMP_WAVELENGTH = 40.0;
 const vec2 CLUMP_TREES = vec2(0.25, 1.3);
 const vec2 CLUMP_BUSHES = vec2(1.6, 0.6);
@@ -323,22 +334,23 @@ float packedRockColour(int body, vec3 climate, float ore, uint resourceId) {
 
 // A kept plant or rock: listed when near, and given the next instance of its kind.
 // A plant placed: its kind (a tree's variant picked by VARIANT_SALT's
-// hash), `lower` m down along its up, listed in NearbyTrees when it has a
-// trunk or is a rock, and its instance claimed; a tree leans by `lean`
+// hash, 8 times its `grove` index added), `lower` m down along its up,
+// listed in NearbyTrees when it has a trunk or is a rock (8 times `grove`
+// added to its face), and its instance claimed; a tree leans by `lean`
 // (radians, a tangent vector in planet space), packed with its tint
 // (vegetationPackLean).
 void place(ScatterChunk chunk, Candidate x, int kind, float size, float turn, float tint, float colour, uint grade,
-           uint resourceId, vec3 lean, float lower) {
+           uint resourceId, vec3 lean, float lower, int grove) {
     vec3 drawn = candidateDrawn(chunk, x);
     if (kind < VEGETATION_TREE_KINDS) {
-        uint h = terrainHash(ivec3(x.cell, chunk.face + VARIANT_SALT));
+        uint h = terrainHash(ivec3(x.cell, chunk.face + VARIANT_SALT + 8 * grove));
         kind = vegetationVariantKind(kind, int(h % uint(VEGETATION_VARIANTS)));
     }
     bool trunk = vegetationIsTree(kind) || kind == KIND_CACTUS;
     bool rock = kind == KIND_ROCK || kind == KIND_BOULDER
                 || (kind >= VEGETATION_SCAN_FIRST && SCAN_ROCK[kind - VEGETATION_SCAN_FIRST]);
     if ((trunk || rock) && x.distance <= vegetation.nearby.x) {
-        listNearby(drawn, size, tint, kind, grade, resourceId, chunk.face, x.cell, chunk.body, turn);
+        listNearby(drawn, size, tint, kind, grade, resourceId, chunk.face + 8 * grove, x.cell, chunk.body, turn);
     }
     uint capacity = uint(vegetation.lod.z), grassCapacity = uint(vegetation.grass.w);
     uint at;
@@ -432,7 +444,98 @@ void scatterScans(ScatterChunk chunk, bool small, float density) {
             continue;
         }
         place(chunk, x, VEGETATION_SCAN_FIRST + scan, size, turn, tint, vegetationPackColour(vec3(1.0)), 0u,
-              RESOURCE_NONE, vec3(0.0), 0.0);
+              RESOURCE_NONE, vec3(0.0), 0.0, 0);
+    }
+}
+
+// The clump noise at `radial`: 0 between the clumps .. 1 in them.
+float clumpAt(vec3 radial) {
+    return smoothstep(-0.35, 0.35, noise3(radial * (terrain.siteShape.z / CLUMP_WAVELENGTH) + vec3(5.3, 11.9, 2.1)));
+}
+
+// A tree's kind (its near mesh's) and packed colour from its draws and what grows at its point.
+void pickTree(float form, float variant, vec4 chances, vec3 forms, vec3 leaf, float dry, out int kind,
+              out float colour) {
+    vec3 foliage;
+    if (form < chances.y) {
+        kind = variant < 0.35 ? KIND_CONIFER_A : variant < 0.65 ? KIND_FIR : KIND_CONIFER_B;
+        foliage = leaf * CONIFER_SHADE;
+    } else {
+        bool acacia = (form - chances.y) / max(1.0 - chances.y, 1e-4) < forms.x;
+        kind = acacia ? KIND_ACACIA : variant < 0.5 ? KIND_BROADLEAF_A : KIND_BROADLEAF_B;
+        foliage = leaf * BROADLEAF_SHADE;
+    }
+    colour = vegetationPackColour(mix(foliage, DRY_FOLIAGE * length(foliage) / length(DRY_FOLIAGE), DRY_SHARE * dry));
+}
+
+// A tree's youth and stunting (its youth hashed with 8 times `grove` added to YOUNG_SALT) on its size, and
+// its lean and sinking on its slope.
+void standTree(ScatterChunk chunk, Candidate x, int grove, vec3 radial, vec3 normal, float edge, float stunt,
+               inout float size, out vec3 lean, out float lower) {
+    float young = float(terrainHash(ivec3(x.cell, chunk.face + YOUNG_SALT + 8 * grove)) & 0xFFFFu) / 65536.0;
+    float youngShare = YOUNG_SHARE * max(edge, YOUNG_ANYWHERE);
+    if (young < youngShare) size *= mix(YOUNG_SIZE.x, YOUNG_SIZE.y, young / youngShare);
+    size *= 1.0 - STUNT * stunt;
+    vec3 downhill = normal - radial * dot(normal, radial);
+    lean = downhill * min(LEAN_PER_SLOPE * length(downhill), VEGETATION_LEAN_MOST) / max(length(downhill), 1e-6);
+    lower = SINK + SINK_SLOPE * length(downhill);
+}
+
+// The grove trees of the trees' grid's cells within the detailed meshes' distance.
+void scatterGroves(ScatterChunk chunk, float density) {
+    float near = vegetation.lod.x;
+    if (chunk.nearest > near) return;
+    float cells = vegetation.settings.z;
+    int cu0, cv0;
+    uint across, count;
+    scatterCells(chunk, cells, cu0, cv0, across, count);
+    for (uint k = gl_LocalInvocationID.x; k < count; k += 64u) {
+        vec3 taken[GROVE_TREES + 1];
+        Candidate own;
+        // The cell's own candidate, when it lies in this chunk (else the grove trees keep apart from their own alone).
+        bool here = scatterCandidate(chunk, cells, cu0, cv0, across, k, 0, 1e30, own);
+        taken[0] = own.position;
+        int placed = here ? 1 : 0;
+        for (int grove = 1; grove <= GROVE_TREES; ++grove) {
+            Candidate x;
+            int salt = GROVE_SALT + 8 * grove;
+            if (!scatterCandidate(chunk, cells, cu0, cv0, across, k, salt, near, x)) continue;
+            float pick = nextRandom(x.hash);
+            float form = nextRandom(x.hash);
+            float variant = nextRandom(x.hash);
+            float grow = nextRandom(x.hash);
+            float turn = 6.2831853 * nextRandom(x.hash);
+            float tint = nextRandom(x.hash);
+            if (pick >= density * GROVE_CHANCE) continue;
+            bool apart = true;
+            for (int i = 0; i < placed; ++i) apart = apart && length(x.position - taken[i]) >= GROVE_SPACING;
+            if (!apart) continue;
+            vec3 radial, normal, climate;
+            float height;
+            candidateGround(chunk, x, radial, height, normal, climate);
+            float clump = smoothstep(GROVE_CLUMP.x, GROVE_CLUMP.y, clumpAt(radial));
+            if (clump <= 0.0) continue;
+            vec3 wavered = climate + vec3(TREELINE_WAVER * noise3(radial * (terrain.siteShape.z / TREELINE_WAVELENGTH)
+                                                                  + vec3(13.1, 2.7, 8.3)), 0.0, 0.0);
+            vec3 leaf, grass, forms;
+            vec4 chances = biomePlants(radial, height, normal, wavered, leaf, grass, forms);
+            float edge, stunt, dry;
+            forestEdges(radial, height, normal, wavered, edge, stunt, dry);
+            if (pick >= density * GROVE_CHANCE * min(chances.x, MAX_TREE_CHANCE) * clump * (1.0 - EDGE_TREES * edge)) {
+                continue;
+            }
+            int kind;
+            float colour;
+            pickTree(form, variant, chances, forms, leaf, dry, kind, colour);
+            float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow);
+            vec3 lean;
+            float lower;
+            standTree(chunk, x, grove, radial, normal, edge, stunt, size, lean, lower);
+            if (size < 0.05) continue;
+            if (candidateWet(chunk, radial) || candidateCleared(chunk, x, radial, CLEAR_PLANTS, salt)) continue;
+            taken[placed++] = x.position;
+            place(chunk, x, kind, size, turn, tint, colour, 0u, RESOURCE_NONE, lean, lower, grove);
+        }
     }
 }
 
@@ -478,8 +581,7 @@ void main() {
                                                                       + vec3(13.1, 2.7, 8.3)), 0.0, 0.0);
                 chances = biomePlants(radial, height, normal, wavered, leaf, grass, forms);
                 forestEdges(radial, height, normal, wavered, edge, stunt, dry);
-                float clump = smoothstep(-0.35, 0.35, noise3(radial * (terrain.siteShape.z / CLUMP_WAVELENGTH)
-                                                          + vec3(5.3, 11.9, 2.1)));
+                float clump = clumpAt(radial);
                 treeChance = density * min(chances.x, MAX_TREE_CHANCE) * mix(CLUMP_TREES.x, CLUMP_TREES.y, clump)
                            * (1.0 - EDGE_TREES * edge);
                 bushChance = density * chances.z * mix(CLUMP_BUSHES.x, CLUMP_BUSHES.y, clump)
@@ -490,18 +592,8 @@ void main() {
             if (pick < treeChance) {
                 float full = vegetation.thinning.x;
                 if (x.distance > full && thin * x.distance * x.distance >= full * full) continue;
-                vec3 foliage;
-                if (form < chances.y) {
-                    kind = variant < 0.35 ? KIND_CONIFER_A : variant < 0.65 ? KIND_FIR : KIND_CONIFER_B;
-                    foliage = leaf * CONIFER_SHADE;
-                } else {
-                    bool acacia = (form - chances.y) / max(1.0 - chances.y, 1e-4) < forms.x;
-                    kind = acacia ? KIND_ACACIA : variant < 0.5 ? KIND_BROADLEAF_A : KIND_BROADLEAF_B;
-                    foliage = leaf * BROADLEAF_SHADE;
-                }
+                pickTree(form, variant, chances, forms, leaf, dry, kind, colour);
                 if (x.distance > vegetation.lod.x) kind += 1;
-                colour = vegetationPackColour(mix(foliage, DRY_FOLIAGE * length(foliage) / length(DRY_FOLIAGE),
-                                                  DRY_SHARE * dry));
             } else if (x.distance >= bushRange) {
                 continue;
             } else if (pick < treeChance + bushChance) {
@@ -529,27 +621,20 @@ void main() {
                 if (size < 0.05) continue;
                 uint resourceId = rockResource(chunk.body, radial, climate, ore);
                 colour = packedRockColour(chunk.body, climate, ore, resourceId);
-                place(chunk, x, kind, size, turn, tint, colour, oreGrade(ore), resourceId, vec3(0.0), 0.0);
+                place(chunk, x, kind, size, turn, tint, colour, oreGrade(ore), resourceId, vec3(0.0), 0.0, 0);
                 continue;
             }
             float size = mix(HEIGHTS[kind].x, HEIGHTS[kind].y, grow) * smoothstep(range, range * FADE_START, x.distance);
             vec3 lean = vec3(0.0);
             float lower = 0.0;
-            if (kind < VEGETATION_TREE_KINDS) {
-                float young = float(terrainHash(ivec3(x.cell, chunk.face + YOUNG_SALT)) & 0xFFFFu) / 65536.0;
-                float youngShare = YOUNG_SHARE * max(edge, YOUNG_ANYWHERE);
-                if (young < youngShare) size *= mix(YOUNG_SIZE.x, YOUNG_SIZE.y, young / youngShare);
-                size *= 1.0 - STUNT * stunt;
-                vec3 downhill = normal - radial * dot(normal, radial);
-                lean = downhill * min(LEAN_PER_SLOPE * length(downhill), VEGETATION_LEAN_MOST)
-                       / max(length(downhill), 1e-6);
-                lower = SINK + SINK_SLOPE * length(downhill);
-            }
+            if (kind < VEGETATION_TREE_KINDS) standTree(chunk, x, 0, radial, normal, edge, stunt, size, lean, lower);
             if (size < 0.05) continue;
             if (candidateWet(chunk, radial) || candidateCleared(chunk, x, radial, CLEAR_PLANTS, 0)) continue;
-            place(chunk, x, kind, size, turn, tint, colour, 0u, RESOURCE_NONE, lean, lower);
+            place(chunk, x, kind, size, turn, tint, colour, 0u, RESOURCE_NONE, lean, lower, 0);
         }
     }
+
+    if (plants && !moon) scatterGroves(chunk, density);
 
     // The scans' two grids.
     if (vegetation.scans.x != 0.0 && !moon) {
@@ -590,6 +675,6 @@ void main() {
         }
         uint resourceId = rockResource(chunk.body, radial, climate, ore);
         place(chunk, x, KIND_ROCK, size, turn, tint, packedRockColour(chunk.body, climate, ore, resourceId), oreGrade(ore),
-              resourceId, vec3(0.0), 0.0);
+              resourceId, vec3(0.0), 0.0, 0);
     }
 }
