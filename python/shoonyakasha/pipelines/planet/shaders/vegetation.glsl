@@ -20,8 +20,8 @@
 //
 // Kinds (one indirect draw each, as shoonyakasha.planet.vegetation.KINDS):
 // each tree's variant 0 near and far (its impostor) in turn, conifer a and
-// b, broadleaf a and b, acacia (0 to 9); then bush, shrub, cactus (10 to
-// 12); rock and boulder (13, 14); grass (15); then the scans
+// b, broadleaf a and b, acacia, fir (0 to 11); then bush, shrub, cactus (12
+// to 14); rock and boulder (15, 16); grass (17); then the scans
 // (VEGETATION_SCAN_FIRST on, shoonyakasha.planet.scans.SCANS); then each
 // tree's variants 1 to VEGETATION_VARIANTS - 1, near and far each
 // (VEGETATION_VARIANT_FIRST on; vegetationVariantKind). Their instances
@@ -43,17 +43,17 @@
 // cross the normal turned round (vegetationScanPart); its colour.rgb is its
 // tangent, and its (u, v) its material's own (vegetationScanUv).
 
-const int VEGETATION_KINDS = 61;
-const int VEGETATION_GRASS = 15;
-const int VEGETATION_SCAN_FIRST = 16;
+const int VEGETATION_KINDS = 69;
+const int VEGETATION_GRASS = 17;
+const int VEGETATION_SCAN_FIRST = 18;
 const int VEGETATION_SCANS = 15;
-const int VEGETATION_ROCK = 13;
-const int VEGETATION_BOULDER = 14;
+const int VEGETATION_ROCK = 15;
+const int VEGETATION_BOULDER = 16;
 const float VEGETATION_ON_MOON = 4194304.0;   // 2^22, above every packed colour
 const float VEGETATION_ORE = 8388608.0;       // 2^23
-const int VEGETATION_TREE_KINDS = 10;         // the trees' variant 0 kinds come first, near then far each
+const int VEGETATION_TREE_KINDS = 12;         // the trees' variant 0 kinds come first, near then far each
 const int VEGETATION_VARIANTS = 4;
-const int VEGETATION_VARIANT_FIRST = 31;      // the trees' later variants' kinds, after the scans
+const int VEGETATION_VARIANT_FIRST = 33;      // the trees' later variants' kinds, after the scans
 
 const int VEGETATION_PART_BARK = 0;
 const int VEGETATION_PART_CARD = 1;

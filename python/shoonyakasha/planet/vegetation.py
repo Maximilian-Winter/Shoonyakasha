@@ -9,6 +9,8 @@ the kinds vegetation_scatter.comp and grass_scatter.comp place:
                               rounded crown)
     broadleaf_a, broadleaf_b  a round crown and a tall oval one
     acacia                    a flat-topped crown on a forked trunk
+    fir                       a narrow fir, level branches of flat sprays
+                              (vegetation_textures' fir cards) to the top
     each tree grown by tree_generator from its species (SPECIES) as variant
     0 of VARIANTS; each also "far": one camera-facing square about its
     bounding sphere (vegetation_impostors.sphere) showing its octahedral
@@ -79,7 +81,7 @@ import numpy as np
 from . import scans, tree_generator, vegetation_textures
 from .vegetation_impostors import sphere
 
-TREES = ("conifer_a", "conifer_b", "broadleaf_a", "broadleaf_b", "acacia")
+TREES = ("conifer_a", "conifer_b", "broadleaf_a", "broadleaf_b", "acacia", "fir")
 VARIANTS = 4                 # grown trees of each species
 KINDS = (tuple(k for tree in TREES for k in (tree, tree + "_far")) + ("bush", "shrub", "cactus", "rock", "boulder",
                                                                        "grass") + scans.NAMES

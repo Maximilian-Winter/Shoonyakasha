@@ -8,6 +8,9 @@ holding a .blend), the object in it, its triangle budget, its family
 it is small (scattered on the scans' fine, near grid; else on their coarse,
 far one), whether it is a rock (opaque, with a convex hull for its
 collider) and how deep it sinks into the ground, as a share of its height.
+CARD_SCANS are scanned twigs (the "card" family), which become foliage
+cards of vegetation_textures' atlas rather than scattered scans; ALL is
+both.
 vegetation_scatter.comp holds the same table (its family, heights and
 smallness per kind, in this order). The scans are prepared once (scan_export.py, with
 Blender) into DIRECTORY/prepared/<kind>/: mesh.npz (positions in metres,
@@ -23,8 +26,8 @@ current directory; DIRECTORY is SHOONYAKASHA_SCANS, else
 shoonyakasha/space_assets in the user's cache (beside the ground's
 textures).
 
-`prepared(kind)` gives a kind's prepared data (Scan), or None when it is
-not prepared; `available()` whether every kind is. `atlas()` packs every
+`prepared(kind)` gives a kind's prepared data (Scan; of ALL), or None
+when it is not prepared; `available()` whether every kind of SCANS is. `atlas()` packs every
 prepared material's textures into an albedo atlas and a normal atlas of
 CELL x CELL cells, ATLAS_COLUMNS a row (needs Pillow).
 """
@@ -78,6 +81,11 @@ SCANS = (
     ScanKind("vt_boulder", "verdant_trail", "boulder_01", 4000, "rock", (2.5, 4.5), rock=True, sink=0.12),
     ScanKind("vt_rock_face", "verdant_trail", "rock_face", 4000, "rock", (2.5, 4.5), rock=True, sink=0.15),
 )
+CARD_SCANS = (
+    ScanKind("fir_twig_main", "pine_forest", "fir_twig_main_a", 4000, "card", (0.0, 0.0)),
+    ScanKind("fir_twig_tip", "pine_forest", "fir_twig_tip_d", 2000, "card", (0.0, 0.0)),
+)
+ALL = SCANS + CARD_SCANS
 NAMES = tuple(s.name for s in SCANS)
 HULL_POINTS = 64             # a rock's hull has at most this many points
 CELL = 512                   # texels a side of an atlas cell
@@ -121,7 +129,7 @@ class Scan:
 def prepared(kind):
     """The kind's prepared Scan (by ScanKind or name), or None."""
     if isinstance(kind, str):
-        kind = next(s for s in SCANS if s.name == kind)
+        kind = next(s for s in ALL if s.name == kind)
     folder = prepared_directory(kind.name)
     try:
         data = np.load(os.path.join(folder, "mesh.npz"))

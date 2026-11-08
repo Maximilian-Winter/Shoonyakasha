@@ -73,7 +73,7 @@ class ScansTest(unittest.TestCase):
         self.assertTrue(scans.available())
 
     def test_check(self):
-        for k in scans.SCANS:
+        for k in scans.ALL:
             write_scan(k)
         scan_export.write_credits()
         lines, ok = scan_export.check()

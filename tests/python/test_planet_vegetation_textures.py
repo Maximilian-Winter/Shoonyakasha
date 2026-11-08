@@ -45,6 +45,36 @@ class RegionsTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAVE_PIL, "Pillow is needed to bake the textures")
+class TwigCardTest(unittest.TestCase):
+    def test_a_twig_seen_from_above(self):
+        import os
+        import tempfile
+        from PIL import Image
+        from shoonyakasha.planet import scans
+        with tempfile.TemporaryDirectory() as folder:
+            texture = np.zeros((8, 8, 4), np.uint8)
+            texture[:, :4] = (40, 120, 40, 255)          # the left half opaque, the right clear
+            path = os.path.join(folder, "albedo.png")
+            Image.fromarray(texture).save(path)
+            # One triangle in the x-z plane: its point at z = 1 (the stalk), its wide end at z = 0.
+            positions = np.array([[-1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]], np.float32)
+            uvs = np.array([[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]], np.float32)
+            scan = scans.Scan(scans.CARD_SCANS[0], positions, np.tile([0.0, 1.0, 0.0], (3, 1)),
+                              np.tile([1.0, 0.0, 0.0, 1.0], (3, 1)), uvs, np.zeros(3, np.uint8),
+                              np.array([0, 1, 2], np.uint32), np.zeros((0, 3), np.float32),
+                              [{"albedo": path, "cutout": True}])
+            card = np.asarray(vt.twig_card(scan, 64))
+        alpha = card[..., 3] > 127
+        self.assertTrue(alpha.any())
+        rows = np.nonzero(alpha.any(axis=1))[0]
+        # The triangle narrows towards its stalk, at the card's base (the bottom rows).
+        self.assertGreater(alpha[rows[0]].sum(), alpha[rows[-1]].sum())
+        # Only the texture's opaque half, u below 1/2: where x < z, so at the wide end (z = 0) its left side.
+        self.assertGreater(alpha[:, :32].sum(), 1.3 * alpha[:, 32:].sum())
+        self.assertGreater(alpha[rows[0], :32].sum(), 3 * alpha[rows[0], 32:].sum())
+
+
+@unittest.skipUnless(HAVE_PIL, "Pillow is needed to bake the textures")
 class AtlasTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

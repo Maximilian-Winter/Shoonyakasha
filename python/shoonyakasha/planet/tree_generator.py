@@ -287,6 +287,13 @@ SPECIES = {
                sections=2, segments=3)],
         Leaves(("broadleaf_a", "broadleaf_b"), count=5, start=0.2, size=0.2, angle=40.0, up=0.4),
         force=(0.0, 1.0, 0.0), force_strength=0.25, trunk_radius=0.043),
+    "fir": Species(                     # a narrow fir: level branches of flat sprays to the top
+        "fir",
+        [Level(sections=6, segments=7, taper=0.08, gnarliness=0.015),
+         Level(children=40, start=0.12, angle=88.0, length=0.26, radius=0.3, shorten=0.9, taper=0.3,
+               gnarliness=0.04, sections=2, segments=3)],
+        Leaves(("fir_a", "fir_b"), count=7, start=0.05, size=0.18, angle=20.0, up=0.0, flat=True),
+        force=(0.0, -1.0, 0.0), force_strength=0.08, twist=2.4, trunk_radius=0.026, crown_normal=0.6),
     "acacia": Species(                  # a flat-topped crown on a forked trunk
         "acacia",
         [Level(sections=3, segments=7, taper=0.7, gnarliness=0.08),

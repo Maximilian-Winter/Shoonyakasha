@@ -20,8 +20,9 @@
 // in view fit their kinds' instances. A tree is a conifer by the biomes'
 // conifers' share, else an acacia by their acacias' share, else a
 // broadleaf tree; a bush is a cactus by their cacti's share, else a shrub
-// by their shrubs' share, else a bush (biomePlants' forms). Conifers and
-// broadleaf trees are variant a or b by a draw. A kept plant stands on the
+// by their shrubs' share, else a bush (biomePlants' forms). A conifer is a
+// spruce (35 %), a fir (30 %) or a pine by a draw, a broadleaf tree round
+// or tall. A kept plant stands on the
 // chunk's surface as drawn (morph.glsl's morphed vertices, split along the
 // chunk's quads' diagonals), its height shrinking to nothing over the last
 // 15 % of the range, with a hashed size in its kind's range of heights, turn
@@ -88,16 +89,17 @@ const int KIND_CONIFER_B = 2;
 const int KIND_BROADLEAF_A = 4;
 const int KIND_BROADLEAF_B = 6;
 const int KIND_ACACIA = 8;
-const int KIND_BUSH = 10;
-const int KIND_SHRUB = 11;
-const int KIND_CACTUS = 12;
+const int KIND_FIR = 10;
+const int KIND_BUSH = 12;
+const int KIND_SHRUB = 13;
+const int KIND_CACTUS = 14;
 const int KIND_ROCK = VEGETATION_ROCK;
 const int KIND_BOULDER = VEGETATION_BOULDER;
 // Each kind's heights (m), lowest and highest; a rock's height above its base (it is about 2.6 times as
 // wide, a boulder 1.8 times).
-const vec2 HEIGHTS[15] = vec2[15](vec2(9.0, 18.0), vec2(9.0, 18.0), vec2(12.0, 22.0), vec2(12.0, 22.0),
+const vec2 HEIGHTS[17] = vec2[17](vec2(9.0, 18.0), vec2(9.0, 18.0), vec2(12.0, 22.0), vec2(12.0, 22.0),
                                   vec2(7.0, 13.0), vec2(7.0, 13.0), vec2(9.0, 16.0), vec2(9.0, 16.0),
-                                  vec2(5.0, 9.0), vec2(5.0, 9.0), vec2(1.2, 2.6), vec2(0.5, 1.3),
+                                  vec2(5.0, 9.0), vec2(5.0, 9.0), vec2(10.0, 20.0), vec2(10.0, 20.0), vec2(1.2, 2.6), vec2(0.5, 1.3),
                                   vec2(2.5, 7.0), vec2(0.08, 0.23), vec2(0.45, 1.4));
 const float FADE_START = 0.85;      // of the range: where heights start to shrink
 const float MAX_TREE_CHANCE = 0.97;
@@ -466,7 +468,7 @@ void main() {
                 if (x.distance > full && thin * x.distance * x.distance >= full * full) continue;
                 vec3 foliage;
                 if (form < chances.y) {
-                    kind = variant < 0.6 ? KIND_CONIFER_A : KIND_CONIFER_B;
+                    kind = variant < 0.35 ? KIND_CONIFER_A : variant < 0.65 ? KIND_FIR : KIND_CONIFER_B;
                     foliage = leaf * CONIFER_SHADE;
                 } else {
                     bool acacia = (form - chances.y) / max(1.0 - chances.y, 1e-4) < forms.x;

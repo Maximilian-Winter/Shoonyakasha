@@ -10,6 +10,13 @@ The scans are kept in DIRECTORY: the SHOONYAKASHA_VEGETATION_TEXTURES
 environment variable's directory, else shoonyakasha/vegetation_textures in
 the user's cache (beside the ground's textures).
 
+The fir's cards ("fir_a", "fir_b") are Poly Haven's fir twigs (scans.CARD_SCANS,
+FIR_CARDS) seen from above, flattened along their thin axis, their stalk
+at the card's base, drawn at twice the cell's size with their albedo's
+alpha test and averaged down (`twig_card`), when they are prepared
+(scan_export) and the atlas is not asked for drawn cards (scanned False);
+else the conifer cards drawn here.
+
 `atlas()` bakes the foliage atlas: CARDS cells of CELL x CELL texels in a
 row-major grid ATLAS_COLUMNS wide, RGBA in sRGB, each card's opaque texels
 scaled so their mean is CARD_MEAN (linear) in each channel, which the
@@ -53,7 +60,8 @@ ASSETS = [("leaf", "LeafSet024"), ("needles", "LeafSet019"), ("sprig", "LeafSet0
 
 CELL = 256
 ATLAS_COLUMNS = 4
-CARDS = ("broadleaf_a", "broadleaf_b", "conifer_a", "conifer_b", "bush", "acacia", "shrub", "grass")
+CARDS = ("broadleaf_a", "broadleaf_b", "conifer_a", "conifer_b", "bush", "acacia", "shrub", "grass", "fir_a", "fir_b")
+FIR_CARDS = {"fir_a": ("fir_twig_main", "conifer_a"), "fir_b": ("fir_twig_tip", "conifer_b")}   # (twig, fallback)
 CARD_MEAN = 0.5
 BARK_SIZE = 512
 
@@ -235,10 +243,67 @@ def _stem(card, points, width):
     ImageDraw.Draw(card).line(points, fill=(255, 255, 255, 255), width=width, joint="curve")
 
 
+def twig_card(scan, size=CELL):
+    """A prepared twig (scans.Scan) seen from above as a card: RGBA (PIL
+    image) `size` square, x across, its z down the card (its stalk at the
+    largest z, the card's base), its nearest opaque texel (the albedo's
+    alpha at least 1/2) kept, drawn at twice the size and averaged down, a
+    texel half covered counting as covered so the needles keep their
+    width."""
+    from PIL import Image
+    big = 2 * size
+    p = scan.positions.astype(np.float64)
+    tex = np.asarray(Image.open(scan.textures[0]["albedo"]).convert("RGBA")).astype(np.float64) / 255.0
+    th, tw = tex.shape[:2]
+    lo, hi = p.min(axis=0), p.max(axis=0)
+    span = max(hi[0] - lo[0], hi[2] - lo[2], 1e-6)
+    x = (p[:, 0] - 0.5 * (lo[0] + hi[0])) / span * (big - 1) + 0.5 * (big - 1)
+    y = (p[:, 2] - lo[2]) / span * (big - 1)
+    image = np.zeros((big, big, 4))
+    depth = np.full((big, big), -np.inf)
+    for a, b, c in scan.indices.reshape(-1, 3):
+        X, Y = x[[a, b, c]], y[[a, b, c]]
+        x0, x1 = int(max(np.floor(X.min()), 0)), int(min(np.ceil(X.max()), big - 1))
+        y0, y1 = int(max(np.floor(Y.min()), 0)), int(min(np.ceil(Y.max()), big - 1))
+        d = (Y[1] - Y[2]) * (X[0] - X[2]) + (X[2] - X[1]) * (Y[0] - Y[2])
+        if x1 < x0 or y1 < y0 or abs(d) < 1e-12:
+            continue
+        gx, gy = np.meshgrid(np.arange(x0, x1 + 1) + 0.5, np.arange(y0, y1 + 1) + 0.5)
+        w0 = ((Y[1] - Y[2]) * (gx - X[2]) + (X[2] - X[1]) * (gy - Y[2])) / d
+        w1 = ((Y[2] - Y[0]) * (gx - X[2]) + (X[0] - X[2]) * (gy - Y[2])) / d
+        w2 = 1.0 - w0 - w1
+        inside = (w0 >= 0) & (w1 >= 0) & (w2 >= 0)
+        if not inside.any():
+            continue
+        uv = scan.uvs[[a, b, c]].astype(np.float64)
+        u = (w0 * uv[0, 0] + w1 * uv[1, 0] + w2 * uv[2, 0]) % 1.0
+        v = (w0 * uv[0, 1] + w1 * uv[1, 1] + w2 * uv[2, 1]) % 1.0
+        z = w0 * p[a, 1] + w1 * p[b, 1] + w2 * p[c, 1]
+        texel = tex[(v * (th - 1)).astype(int), (u * (tw - 1)).astype(int)]
+        region = (slice(y0, y1 + 1), slice(x0, x1 + 1))
+        nearer = inside & (texel[..., 3] >= 0.5) & (z > depth[region])
+        depth[region][nearer] = z[nearer]
+        image[region][nearer] = np.concatenate([texel[..., :3], np.ones_like(texel[..., 3:])], -1)[nearer]
+    linear = _srgb_to_linear(image[..., :3])
+    alpha = image[..., 3:]
+    small = (linear * alpha).reshape(size, 2, size, 2, 3).sum(axis=(1, 3))
+    cover = alpha.reshape(size, 2, size, 2, 1).sum(axis=(1, 3))
+    colour = np.where(cover > 0, small / np.maximum(cover, 1e-9), 0.0)
+    out = np.concatenate([_linear_to_srgb(colour), np.minimum(cover / 2.0, 1.0)], -1)
+    return Image.fromarray((np.clip(out, 0.0, 1.0) * 255.0 + 0.5).astype(np.uint8), "RGBA")
+
+
 def _card(name, parts, rng):
     """One card, CELL x CELL: (its leaves, its stems), RGBA (PIL images);
     the stems' colour is set later."""
     from PIL import Image
+    if name in FIR_CARDS:
+        from . import scans
+        twig, fallback = FIR_CARDS[name]
+        scan = scans.prepared(twig) if parts.get("scanned", True) is not False else None
+        if scan is None:
+            return _card(fallback, parts, rng)
+        return twig_card(scan), Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
     card = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
     stems = Image.new("RGBA", (CELL, CELL), (0, 0, 0, 0))
     c = CELL
@@ -324,6 +389,7 @@ def atlas(scanned=None, seed=17):
     """The foliage atlas (uint8 RGBA, sRGB, (rows * CELL, ATLAS_COLUMNS * CELL, 4))."""
     rng = np.random.default_rng(seed)
     parts = {kind: elements(kind, rng, scanned) for kind in ("leaf", "needles", "sprig", "blade")}
+    parts["scanned"] = scanned
     rows = (len(CARDS) + ATLAS_COLUMNS - 1) // ATLAS_COLUMNS
     image = np.zeros((rows * CELL, ATLAS_COLUMNS * CELL, 4), np.uint8)
     for index, name in enumerate(CARDS):
