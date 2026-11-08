@@ -110,6 +110,7 @@ const float MOON_ROCK_CELLS = 0.25; // the moon's grids' cells per face side, of
                                     // planet's on a quarter of its radius
 const int SCAN_SALT = 64;           // tells the large scans' grid from the others in the hash
 const int SCAN_NEAR_SALT = 72;      // and the small scans'
+const int VARIANT_SALT = 2048;      // the hash of a tree's variant, apart from every other draw
 const float SCAN_CELLS = 0.5;       // the large scans' grid's cells per face side, of the trees' (19 m)
 const float SCAN_NEAR_CELLS = 2.0;  // the small scans' (4.8 m)
 const float SCAN_NEAR_RANGE = 250.0;
@@ -266,15 +267,20 @@ float packedRockColour(int body, float ore, uint resourceId) {
 void place(ScatterChunk chunk, Candidate x, int kind, float size, float turn, float tint, float colour, uint grade,
            uint resourceId) {
     vec3 drawn = candidateDrawn(chunk, x);
-    bool trunk = kind < VEGETATION_TREE_KINDS || kind == KIND_CACTUS;
+    if (kind < VEGETATION_TREE_KINDS) {
+        uint h = terrainHash(ivec3(x.cell, chunk.face + VARIANT_SALT));
+        kind = vegetationVariantKind(kind, int(h % uint(VEGETATION_VARIANTS)));
+    }
+    bool trunk = vegetationIsTree(kind) || kind == KIND_CACTUS;
     bool rock = kind == KIND_ROCK || kind == KIND_BOULDER
                 || (kind >= VEGETATION_SCAN_FIRST && SCAN_ROCK[kind - VEGETATION_SCAN_FIRST]);
     if ((trunk || rock) && x.distance <= vegetation.nearby.x) {
         listNearby(drawn, size, tint, kind, grade, resourceId, chunk.face, x.cell, chunk.body, turn);
     }
-    uint capacity = uint(vegetation.lod.z);
+    uint capacity = uint(vegetation.lod.z), grassCapacity = uint(vegetation.grass.w);
     uint at;
-    if (!claimInstance(uint(kind), vegetationFirstInstance(kind, capacity, uint(vegetation.grass.w)), capacity, at)) {
+    if (!claimInstance(uint(kind), vegetationFirstInstance(kind, capacity, grassCapacity),
+                       vegetationCapacity(kind, capacity, grassCapacity), at)) {
         return;
     }
     instances.data[at] = vec4(drawn, size);

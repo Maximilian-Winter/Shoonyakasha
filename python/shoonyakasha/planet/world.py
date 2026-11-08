@@ -622,6 +622,7 @@ class PlanetWorld:
         self.scans_prepared = False        # whether every scan kind was prepared (scans.available)
         self.taken_rocks = TakenRocks(engine)   # the cells whose rocks the scatter leaves out
         self.vegetation_draws = None       # the kinds' draws with no instances, set again each frame
+        self.tree_seed = None              # the seed the trees were grown from (upload_vegetation_meshes)
         self.vegetation_scans = False      # whether the vegetation's textures came from the downloaded scans
         self.temperature_offset = 0.0      # degrees C added to the climate's temperature
         self.moisture_offset = 0.0         # added to the climate's moisture
@@ -821,12 +822,15 @@ class PlanetWorld:
 
     def upload_vegetation_meshes(self):
         """The vegetation's textures (vegetation_textures: the foliage atlas
-        and the bark), the trees' impostors baked from their meshes and those
+        and the bark), the trees grown from the planet's seed
+        (vegetation.forest), their impostors baked from their meshes and those
         (vegetation_impostors), the scans' atlases (scans.atlas), the meshes
         (vegetation.py, with the prepared scans) and the draws' template."""
         engine = self.engine
+        seed = tuple(self.planet.terrain["seed"][:3])
+        self.tree_seed = seed
         atlas, bark = vegetation_textures.atlas(), vegetation_textures.bark()
-        albedo, normals, rects = vegetation_impostors.bake(vegetation.trees(), atlas, bark)
+        albedo, normals, rects = vegetation_impostors.bake(vegetation.trees(seed), atlas, bark)
         engine.set_pipeline_image_data("vegetationAtlas", atlas, format="R8G8B8A8_SRGB", mipmaps=True)
         engine.set_pipeline_image_data("vegetationBark", bark, format="R8G8B8A8_SRGB", mipmaps=True)
         engine.set_pipeline_image_data("vegetationImpostor", albedo, format="R8G8B8A8_SRGB", mipmaps=True)
@@ -837,7 +841,7 @@ class PlanetWorld:
         engine.set_pipeline_image_data("scanNormal", scan_normals, format="R8G8B8A8_UNORM", mipmaps=True)
         self.scan_grid = (columns, rows)
         self.scans_prepared = scans.available()
-        vertices, indices, ranges = vegetation.meshes(rects, cells)
+        vertices, indices, ranges = vegetation.meshes(rects, cells, seed)
         self.engine.set_buffer("VegetationMesh", vertices)
         self.engine.set_buffer("VegetationIndices", indices)
         self.vegetation_draws = vegetation.draw_template(ranges,
@@ -1305,7 +1309,8 @@ class PlanetWorld:
         """Apply changed terrain parameters: every chunk is released, the
         site's height is measured again, the planet's flat sites, its lakes
         and its rivers are dropped, the planet is built again, and its taken
-        rocks are put back. A survey under way starts again."""
+        rocks are put back; with a new seed its trees are grown again
+        (upload_vegetation_meshes, once they were uploaded). A survey under way starts again."""
         self.lod.drop_tree(self.planet.index)
         self.taken_rocks.clear_body(self.planet.index)
         self.regenerations += 1
@@ -1325,6 +1330,12 @@ class PlanetWorld:
         self.patch = None
         self.terrain_version += 1
         self.upload_terrain()
+        if self.tree_seed is not None and tuple(self.planet.terrain["seed"][:3]) != self.tree_seed:
+            self.upload_vegetation_meshes()
+
+    def trunks(self):
+        """Each tree kind's trunk (vegetation.Forest.trunks) as grown from the planet's seed."""
+        return vegetation.forest(self.tree_seed).trunks
 
     def change_terrain(self, name, index, factor):
         """One terrain parameter times `factor`, and the planet built again."""

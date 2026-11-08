@@ -251,7 +251,7 @@
     "VegetationMesh": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 65536,
+      "elementCount": 131072,
       "fields": [
         { "name": "position", "type": "vec4" },
         { "name": "normal", "type": "vec4" },
@@ -261,7 +261,7 @@
     "VegetationIndices": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 196608,
+      "elementCount": 393216,
       "fields": [ { "name": "index", "type": "uint" } ]
     },
     "VegetationInstances": {
@@ -274,7 +274,7 @@
     "VegetationDraws": {
       "usage": "storage_buffer",
       "packing": "std430",
-      "elementCount": 160,
+      "elementCount": 320,
       "fields": [ { "name": "word", "type": "uint" } ]
     },
     "RiverData": {
@@ -880,7 +880,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 320, "drawCount": 15, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 320, "drawCount": 45, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/shadow_vegetation.vert.spv",
@@ -937,7 +937,7 @@
         "type": "draw_indexed_indirect",
         "vertexBuffer": { "buffer": "VegetationMesh" },
         "indexBuffer": { "buffer": "VegetationIndices", "type": "uint32" },
-        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 31, "stride": 20 }
+        "arguments": { "buffer": "VegetationDraws", "offset": 0, "drawCount": 61, "stride": 20 }
       },
       "pipeline": {
         "vertexShader": "shaders/vegetation.vert.spv",

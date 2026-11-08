@@ -16,13 +16,17 @@
 //     scans      x: 1 on, 0 off; y: their range (m); z, w: the scans' atlas's columns and rows of cells
 //     clearings, clearingShapes, clearingAxes   the clearings (clearings.glsl)
 //
-// Kinds (one indirect draw each, their instances from kind * instances per
-// kind, as shoonyakasha.planet.vegetation.KINDS): each tree near and far
-// (its impostor) in turn, conifer a and b, broadleaf a and b, acacia (0 to
-// 9); then bush, shrub, cactus (10 to 12); rock and boulder (13, 14);
-// grass (15), its tufts after the kinds before it; then the scans
-// (VEGETATION_SCAN_FIRST on, shoonyakasha.planet.scans.SCANS), their
-// instances after the grass's (vegetationFirstInstance). An instance is
+// Kinds (one indirect draw each, as shoonyakasha.planet.vegetation.KINDS):
+// each tree's variant 0 near and far (its impostor) in turn, conifer a and
+// b, broadleaf a and b, acacia (0 to 9); then bush, shrub, cactus (10 to
+// 12); rock and boulder (13, 14); grass (15); then the scans
+// (VEGETATION_SCAN_FIRST on, shoonyakasha.planet.scans.SCANS); then each
+// tree's variants 1 to VEGETATION_VARIANTS - 1, near and far each
+// (VEGETATION_VARIANT_FIRST on; vegetationVariantKind). Their instances
+// follow one another in the kinds' order, a tree's kind holding the
+// instances per kind over VEGETATION_VARIANTS, grass's its tufts at most,
+// every other kind the instances per kind (vegetationCapacity,
+// vegetationFirstInstance). An instance is
 // two vec4: (position relative to the camera, height in metres) and (cosine
 // and sine of its turn about its up, its tint 0 .. 1 plus an ore rock's
 // resource id (resources.glsl) as its whole part, and its colour packed by
@@ -37,7 +41,7 @@
 // cross the normal turned round (vegetationScanPart); its colour.rgb is its
 // tangent, and its (u, v) its material's own (vegetationScanUv).
 
-const int VEGETATION_KINDS = 31;
+const int VEGETATION_KINDS = 61;
 const int VEGETATION_GRASS = 15;
 const int VEGETATION_SCAN_FIRST = 16;
 const int VEGETATION_SCANS = 15;
@@ -45,7 +49,9 @@ const int VEGETATION_ROCK = 13;
 const int VEGETATION_BOULDER = 14;
 const float VEGETATION_ON_MOON = 4194304.0;   // 2^22, above every packed colour
 const float VEGETATION_ORE = 8388608.0;       // 2^23
-const int VEGETATION_TREE_KINDS = 10;         // the trees' kinds come first, near then far each
+const int VEGETATION_TREE_KINDS = 10;         // the trees' variant 0 kinds come first, near then far each
+const int VEGETATION_VARIANTS = 4;
+const int VEGETATION_VARIANT_FIRST = 31;      // the trees' later variants' kinds, after the scans
 
 const int VEGETATION_PART_BARK = 0;
 const int VEGETATION_PART_CARD = 1;
@@ -84,11 +90,33 @@ vec4 vegetationScanCell(int cell) {
     return vec4(vec2(float(cell % int(grid.x)), float(cell / int(grid.x))) * size, size);
 }
 
-// The first instance of `kind`: `capacity` per kind, grass's `grassCapacity`
-// after its own first, the scans after the grass's.
+// Whether `kind` is a tree's, near or far, of any variant.
+bool vegetationIsTree(int kind) {
+    return kind < VEGETATION_TREE_KINDS || kind >= VEGETATION_VARIANT_FIRST;
+}
+
+// The kind of `variant` (0 .. VEGETATION_VARIANTS - 1) of the tree whose variant 0's kind is `kind`.
+int vegetationVariantKind(int kind, int variant) {
+    if (variant == 0) return kind;
+    return VEGETATION_VARIANT_FIRST + ((kind / 2) * (VEGETATION_VARIANTS - 1) + variant - 1) * 2 + (kind & 1);
+}
+
+// The instances `kind` holds: a tree's `capacity` over VEGETATION_VARIANTS,
+// grass's `grassCapacity`, every other kind's `capacity`.
+uint vegetationCapacity(int kind, uint capacity, uint grassCapacity) {
+    if (kind == VEGETATION_GRASS) return grassCapacity;
+    return vegetationIsTree(kind) ? capacity / uint(VEGETATION_VARIANTS) : capacity;
+}
+
+// The first instance of `kind`: the kinds before it each holding vegetationCapacity.
 uint vegetationFirstInstance(int kind, uint capacity, uint grassCapacity) {
-    if (kind <= VEGETATION_GRASS) return uint(kind) * capacity;
-    return uint(VEGETATION_GRASS) * capacity + grassCapacity + uint(kind - VEGETATION_SCAN_FIRST) * capacity;
+    uint tree = capacity / uint(VEGETATION_VARIANTS);
+    uint trees = uint(VEGETATION_TREE_KINDS) * tree;
+    if (kind < VEGETATION_TREE_KINDS) return uint(kind) * tree;
+    if (kind <= VEGETATION_GRASS) return trees + uint(kind - VEGETATION_TREE_KINDS) * capacity;
+    uint scans = trees + uint(VEGETATION_GRASS - VEGETATION_TREE_KINDS) * capacity + grassCapacity;
+    if (kind < VEGETATION_VARIANT_FIRST) return scans + uint(kind - VEGETATION_SCAN_FIRST) * capacity;
+    return scans + uint(VEGETATION_SCANS) * capacity + uint(kind - VEGETATION_VARIANT_FIRST) * tree;
 }
 
 // Whether an instance's packed colour marks it as standing on the moon.

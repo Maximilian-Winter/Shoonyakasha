@@ -4,14 +4,14 @@ origin, built of bark-textured trunks and branches and alpha-tested
 foliage cards (quads showing a card of vegetation_textures' atlas), in
 the kinds vegetation_scatter.comp and grass_scatter.comp place:
 
-    conifer_a, conifer_b      a spruce (whorls of drooping branch cards to
-                              the top) and a pine (a bare trunk under a
-                              rounded crown of branch cards)
-    broadleaf_a, broadleaf_b  a round crown and a tall oval one of twig
-                              cards on a trunk with branches
+    conifer_a, conifer_b      a spruce (whorls of drooping branches to the
+                              top) and a pine (a bare trunk under a
+                              rounded crown)
+    broadleaf_a, broadleaf_b  a round crown and a tall oval one
     acacia                    a flat-topped crown on a forked trunk
-    each of these also "far": one camera-facing quad showing its impostor
-    (vegetation_impostors), as wide as the tree
+    each tree grown by tree_generator from its species (SPECIES) as variant
+    0 of VARIANTS; each also "far": one camera-facing quad showing its
+    impostor (vegetation_impostors), as wide as the tree
     bush                      a mound of cluster cards
     shrub                     a few upright cards of bare twigs and leaves
     cactus                    a ribbed column with an arm or two
@@ -23,6 +23,8 @@ the kinds vegetation_scatter.comp and grass_scatter.comp place:
                               triangles for a mesh of its own
     grass                     three crossed cards of a tuft
     then each kind of scans.SCANS, a prepared scan (scan_mesh)
+    then each tree's variants 1 to VARIANTS - 1 ("conifer_a.1", near then
+    far each), from VARIANT_FIRST
 
 A vertex is three vec4: position (xyz) and the texture's u; the normal
 (xyz) and the part (w: PART_BARK, PART_CARD, PART_GRASS, PART_IMPOSTOR,
@@ -36,29 +38,46 @@ texture around and up the trunk (in its height's units); cards' and
 impostors' are in their atlas. A card's normal points out from its crown's
 centre, leaning towards the card's own, so a crown is lit as a whole.
 
-`meshes(impostor_rects=None, scan_cells=None)` gives every kind's
+`forest(seed)` grows every variant of every tree from the world's
+`seed` (each from the seed, its species and its variant), the same for the
+same seed: `Forest` with `meshes` (each near tree kind's (vertices,
+indices)) and `trunks` (each near and far tree kind's trunk radius and the
+height its first branch leaves it, as shares of its height).
+`species_of(kind)` gives a tree kind's species (its variant 0's name),
+`is_tree(kind)` whether a kind is a tree's, near or far.
+
+`meshes(impostor_rects=None, scan_cells=None, seed=None)` gives every kind's
 vertices in one array, the indices in one array (into the whole vertex
 array) and each kind's (first index, index count); `impostor_rects` maps
 a tree's name to its impostor's (u0, v0, u1, v1) (the whole image without
 it), `scan_cells` maps (scan kind, material) to its atlas cell
 (scans.atlas); a scan not prepared, or without `scan_cells`, has no
-triangles. `trees()` gives
-each tree's near mesh by name, for baking impostors.
+triangles; the trees are `forest(seed)`'s (seed (0, 0, 0) when None).
+`trees(seed=None)` gives each near tree kind's mesh by name, for baking
+impostors. `instance_firsts(capacity, grass_capacity)` gives each kind's
+first instance: a tree kind has `capacity` / VARIANTS, grass
+`grass_capacity`, every other kind `capacity`.
 `draw_template(ranges, firsts)` gives the kinds' indexed indirect draws
 with no instances.
 """
 
+import functools
 import math
+import zlib
+from dataclasses import dataclass
 
 import numpy as np
 
-from . import scans, vegetation_textures
+from . import scans, tree_generator, vegetation_textures
 
 TREES = ("conifer_a", "conifer_b", "broadleaf_a", "broadleaf_b", "acacia")
-KINDS = tuple(k for tree in TREES for k in (tree, tree + "_far")) + ("bush", "shrub", "cactus", "rock", "boulder",
-                                                                      "grass") + scans.NAMES
+VARIANTS = 4                 # grown trees of each species
+KINDS = (tuple(k for tree in TREES for k in (tree, tree + "_far")) + ("bush", "shrub", "cactus", "rock", "boulder",
+                                                                       "grass") + scans.NAMES
+         + tuple(k for tree in TREES for v in range(1, VARIANTS) for k in ("%s.%d" % (tree, v), "%s.%d_far" % (tree, v))))
 GRASS = KINDS.index("grass")
 SCAN_FIRST = GRASS + 1
+VARIANT_FIRST = SCAN_FIRST + len(scans.NAMES)
 # name: (seed, height over width before scaling, the icosphere's subdivisions)
 ROCKS = {"rock": (21, 0.55, 1), "boulder": (22, 0.7, 2)}
 ROCK_SINK = 0.25             # units a rock reaches below its base
@@ -176,64 +195,6 @@ def _crown(b, rng, centre, radii, cards, size, rect_names):
         tip = base + out * length
         b.card(base, out, facing, length, length, rect, centre, _crown_shade(base, centre, radii),
                _crown_shade(tip, centre, radii))
-
-
-def _tree(name):
-    rng = np.random.default_rng(sum(map(ord, name)))
-    b = _Builder()
-    wood = (0.8, 0.9)
-    if name == "conifer_a":
-        b.tube((0, -0.05, 0), (0, 1.0, 0), 0.03, 0.004, 7, wood)
-        whorls = 11
-        for i in range(whorls):
-            t = i / (whorls - 1)
-            y = 0.24 + 0.71 * t
-            reach = 0.3 * (1.0 - t) + 0.05
-            for k in range(6):
-                a = 2.0 * math.pi * (k / 6 + rng.uniform(-0.05, 0.05) + 0.37 * i)
-                out = np.array([math.cos(a), -0.35 - 0.2 * rng.random(), math.sin(a)])
-                facing = np.array([0.0, 1.0, 0.0]) + 0.3 * _random_unit(rng)
-                shade = 0.55 + 0.45 * t
-                b.card((0, y, 0), out, facing, reach * 1.1, reach * 1.25,
-                       vegetation_textures.card_rect("conifer_a" if k % 2 else "conifer_b"), (0, y + 0.1, 0),
-                       shade * 0.7, shade, crown_normal=0.6)
-        b.card((0, 0.82, 0), (0, 1, 0), (1, 0, 0), 0.12, 0.2, vegetation_textures.card_rect("conifer_a"),
-               (0, 0.7, 0), 0.9, 1.0)
-        b.card((0, 0.82, 0), (0, 1, 0), (0, 0, 1), 0.12, 0.2, vegetation_textures.card_rect("conifer_b"),
-               (0, 0.7, 0), 0.9, 1.0)
-    elif name == "conifer_b":
-        b.tube((0, -0.05, 0), (0, 0.85, 0), 0.035, 0.012, 7, wood)
-        for k in range(4):
-            a = 2.0 * math.pi * k / 4 + rng.uniform(-0.3, 0.3)
-            end = (0.18 * math.cos(a), 0.8 + rng.uniform(-0.05, 0.05), 0.18 * math.sin(a))
-            b.tube((0, 0.62, 0), end, 0.012, 0.005, 5, wood)
-        _crown(b, rng, (0.0, 0.8, 0.0), (0.3, 0.17, 0.3), 46, 0.2, ("conifer_a", "conifer_b"))
-    elif name in ("broadleaf_a", "broadleaf_b"):
-        tall = name == "broadleaf_b"
-        b.tube((0, -0.05, 0), (0, 0.5, 0), 0.045, 0.03, 8, wood)
-        centre = (0.0, 0.66, 0.0) if tall else (0.0, 0.62, 0.0)
-        radii = (0.24, 0.33, 0.24) if tall else (0.36, 0.3, 0.36)
-        for k in range(5):
-            a = 2.0 * math.pi * k / 5 + rng.uniform(-0.3, 0.3)
-            out = np.array([radii[0] * 0.7 * math.cos(a), rng.uniform(0.0, 0.2), radii[2] * 0.7 * math.sin(a)])
-            b.tube((0, 0.42 + 0.05 * k / 5, 0), np.asarray(centre) + out, 0.022, 0.008, 5, wood)
-        _crown(b, rng, centre, radii, 110 if tall else 140, 0.26, ("broadleaf_a", "broadleaf_b"))
-    elif name == "acacia":
-        b.tube((0, -0.05, 0), (0.02, 0.45, 0), 0.04, 0.03, 7, wood)
-        for k in range(4):
-            a = 2.0 * math.pi * k / 4 + rng.uniform(-0.3, 0.3)
-            end = (0.4 * math.cos(a), 0.78 + rng.uniform(-0.04, 0.04), 0.4 * math.sin(a))
-            b.tube((0.02, 0.43, 0), end, 0.02, 0.008, 5, wood)
-        centre, radii = np.array([0.0, 0.84, 0.0]), np.array([0.6, 0.12, 0.6])
-        for _ in range(90):
-            r, a = math.sqrt(rng.random()) * 0.52, rng.uniform(0, 2 * math.pi)
-            base = centre + np.array([r * math.cos(a), rng.uniform(-0.08, 0.04), r * math.sin(a)])
-            out = _unit(np.array([math.cos(a + rng.uniform(-1, 1)), rng.uniform(0.2, 0.6),
-                                  math.sin(a + rng.uniform(-1, 1))]))
-            facing = _unit(np.array([0.0, 1.0, 0.0]) + 0.8 * _random_unit(rng))
-            b.card(base, out, facing, 0.28, 0.22, vegetation_textures.card_rect("acacia"), centre,
-                   _crown_shade(base, centre, radii), 1.0, crown_normal=0.5)
-    return b
 
 
 def _bush():
@@ -387,16 +348,58 @@ def _impostor(width, rect):
     return b
 
 
-def trees():
-    """Each tree's near mesh by name: (vertices, indices)."""
-    return {name: _tree(name).arrays() for name in TREES}
+def species_of(kind):
+    """The species of a tree kind, near or far: its variant 0's name."""
+    name = kind[:-4] if kind.endswith("_far") else kind
+    return name.split(".")[0]
 
 
-def meshes(impostor_rects=None, scan_cells=None):
+def is_tree(kind):
+    return species_of(kind) in TREES
+
+
+def near_trees():
+    """Every near tree kind's name."""
+    return [k for k in KINDS if is_tree(k) and not k.endswith("_far")]
+
+
+def variant_seed(seed, name):
+    """The seed a near tree kind grows from, from the world's `seed`."""
+    return zlib.crc32(repr((tuple(float(x) for x in seed), name)).encode())
+
+
+@dataclass
+class Forest:
+    meshes: dict                 # near tree kind: (vertices, indices)
+    trunks: dict                 # near and far tree kind: (trunk radius, trunk height) as shares of its height
+
+
+@functools.lru_cache(maxsize=2)
+def _forest(seed):
+    meshes, trunks = {}, {}
+    for name in near_trees():
+        vertices, indices, trunk = tree_generator.grow(tree_generator.SPECIES[species_of(name)],
+                                                       variant_seed(seed, name))
+        meshes[name] = (vertices, indices)
+        trunks[name] = trunks[name + "_far"] = trunk
+    return Forest(meshes, trunks)
+
+
+def forest(seed=None):
+    return _forest(tuple(float(x) for x in (seed or (0.0, 0.0, 0.0))[:3]))
+
+
+def trees(seed=None):
+    """Each near tree kind's mesh by name: (vertices, indices)."""
+    return forest(seed).meshes
+
+
+def meshes(impostor_rects=None, scan_cells=None, seed=None):
     """(vertices (N x 12 float32), indices (uint32, into the whole vertex
     array), [(first index, index count)] per kind)."""
     parts, ranges, first_vertex, first_index = [], [], 0, 0
     all_indices = []
+    grown = trees(seed)
     for name in KINDS:
         if name in scans.NAMES:
             vertices, indices = scan_mesh(scans.prepared(name) if scan_cells is not None else None, scan_cells)
@@ -406,13 +409,20 @@ def meshes(impostor_rects=None, scan_cells=None):
             first_vertex += len(vertices)
             first_index += len(indices)
             continue
-        if name.endswith("_far"):
-            tree = name[:-4]
-            rect = (impostor_rects or {}).get(tree, (0.0, 0.0, 1.0, 1.0))
-            builder = _impostor(impostor_width(_tree(tree).arrays()[0]), rect)
-        elif name in TREES:
-            builder = _tree(name)
-        elif name in ROCKS:
+        if is_tree(name):
+            if name.endswith("_far"):
+                tree = name[:-4]
+                rect = (impostor_rects or {}).get(tree, (0.0, 0.0, 1.0, 1.0))
+                vertices, indices = _impostor(impostor_width(grown[tree][0]), rect).arrays()
+            else:
+                vertices, indices = grown[name]
+            parts.append(vertices)
+            all_indices.append(indices + first_vertex)
+            ranges.append((first_index, len(indices)))
+            first_vertex += len(vertices)
+            first_index += len(indices)
+            continue
+        if name in ROCKS:
             builder = _rock(*ROCKS[name])
         else:
             builder = {"bush": _bush, "shrub": _shrub, "cactus": _cactus, "grass": _grass}[name]()
@@ -425,14 +435,20 @@ def meshes(impostor_rects=None, scan_cells=None):
     return np.concatenate(parts), np.concatenate(all_indices).astype(np.uint32), ranges
 
 
+def kind_capacity(kind, capacity, grass_capacity):
+    """The instances kind index `kind` holds."""
+    if kind == GRASS:
+        return grass_capacity
+    return capacity // VARIANTS if is_tree(KINDS[kind]) else capacity
+
+
 def instance_firsts(capacity, grass_capacity):
-    """Each kind's first instance in VegetationInstances: `capacity` a
-    kind, grass's `grass_capacity` after its own first, the scans after
-    grass's."""
-    firsts = []
+    """Each kind's first instance in VegetationInstances, the kinds one
+    after another in their order, each holding kind_capacity."""
+    firsts, at = [], 0
     for kind in range(len(KINDS)):
-        firsts.append(kind * capacity if kind <= GRASS else GRASS * capacity + grass_capacity
-                      + (kind - SCAN_FIRST) * capacity)
+        firsts.append(at)
+        at += kind_capacity(kind, capacity, grass_capacity)
     return firsts
 
 

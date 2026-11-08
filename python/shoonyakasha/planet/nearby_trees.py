@@ -20,9 +20,10 @@ about its up (cosine, sine), its tint, an ore rock's grade (its ore
 richness, from bits 8 to 15 of the kind's word, over 255; 0 for every
 other) and its resource (resources.py's ids, from the bits from 16 up; 0
 for every other). `rock` tells a rock (rocks.is_rock: a scanned rock too). `trunk`
-gives a plant's trunk as a column: (radius, height) in metres, from
-TRUNKS, the share of the plant's height each mesh's trunk has
-(vegetation.py) near its foot and up to where it thins or forks.
+gives a plant's trunk as a column: (radius, height) in metres, from its
+`trunk_shares` (a tree's from `NearbyTrees.trunks`, the grown trees'
+vegetation.Forest.trunks) or else TRUNKS: the shares of the plant's height
+its trunk has near its foot and up to where its first branch leaves it.
 
 `listed_keys(data)` gives the stamp and the keys of a NearbyTrees
 readback's bytes, without taking it.
@@ -68,6 +69,7 @@ class NearbyTree:
     tint: float = 0.0            # 0 .. 1
     grade: float = 0.0           # an ore rock's ore richness (above rocks.ORE_ROCKS), else 0
     resource: int = 0            # an ore rock's resource (resources.py), else 0
+    trunk_shares: tuple = None   # (trunk radius, trunk height) as shares of its height, or None for TRUNKS's
 
     @property
     def body(self):
@@ -80,8 +82,7 @@ class NearbyTree:
     @property
     def trunk(self):
         """(radius, height) of its trunk in metres."""
-        name = self.kind[:-4] if self.kind.endswith("_far") else self.kind
-        radius, top = TRUNKS[name]
+        radius, top = self.trunk_shares or TRUNKS[vegetation.species_of(self.kind)]
         return radius * self.height * self.width, top * self.height
 
 
@@ -105,6 +106,7 @@ class NearbyTrees:
         self.engine = engine
         self.stamp = 0
         self.cameras = {}            # stamp: the camera's position that frame
+        self.trunks = {}             # tree kind: (trunk radius, trunk height) as shares of its height
 
     def request(self, camera, radius, centres=((0.0, 0.0, 0.0),)):
         """List the plants with trunks and the rocks within `radius` m of
@@ -146,7 +148,7 @@ class NearbyTrees:
         width = 0.85 + 0.3 * (t - np.floor(t)).astype(np.float64)
         keys = np.stack([body, grid, rows[:, 6].astype(np.int64), cells[:, 7], cells[:, 8]], axis=1).tolist()
         names = [vegetation.KINDS[k] for k in kinds.tolist()]
-        return [NearbyTree(tuple(key), name, tuple(b), h, w, (c, s), tint, grade, resource)
+        return [NearbyTree(tuple(key), name, tuple(b), h, w, (c, s), tint, grade, resource, self.trunks.get(name))
                 for key, name, b, h, w, c, s, tint, grade, resource in zip(keys, names, base.tolist(),
                                                                            floats[:, 3].tolist(), width.tolist(),
                                                                            floats[:, 10].tolist(),

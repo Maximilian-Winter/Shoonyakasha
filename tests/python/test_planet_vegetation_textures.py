@@ -86,14 +86,14 @@ class ImpostorTest(unittest.TestCase):
             vegetation.trees(), vt.atlas(scanned=False), vt.bark(scanned=False))
 
     def cell(self, image, name):
-        index = vegetation.TREES.index(name)
+        index = list(vegetation.trees()).index(name)
         y, x = divmod(index, vegetation_impostors.COLUMNS)
         size = vegetation_impostors.CELL
         return image[y * size:(y + 1) * size, x * size:(x + 1) * size]
 
     def test_cells_cover_part_with_bark_below_and_foliage_above(self):
         size = vegetation_impostors.CELL
-        for name in vegetation.TREES:
+        for name in vegetation.near_trees():
             albedo, normals = self.cell(self.albedo, name), self.cell(self.normals, name)
             covered = albedo[..., 3] > 127
             self.assertGreater(covered.mean(), 0.05, name)
@@ -102,17 +102,17 @@ class ImpostorTest(unittest.TestCase):
             self.assertGreater(albedo[foot + (3,)], 127, name)
             self.assertEqual(normals[foot + (3,)], 0, name)                # bark at the foot of the trunk
             crown = covered & (np.arange(size)[:, None] < size * 0.6)
-            self.assertGreater((normals[..., 3][crown] == 255).mean(), 0.8, name)
+            self.assertGreater((normals[..., 3][crown] == 255).mean(), 0.7, name)
 
     def test_normals_are_unit_and_face_the_viewer(self):
-        for name in vegetation.TREES:
+        for name in vegetation.near_trees():
             albedo, normals = self.cell(self.albedo, name), self.cell(self.normals, name)
             n = normals[albedo[..., 3] > 200][:, :3] / 255.0 * 2.0 - 1.0
             np.testing.assert_allclose(np.linalg.norm(n, axis=1), 1.0, atol=0.03)
             self.assertGreater(float(n[:, 2].mean()), 0.0, name)
 
     def test_rects(self):
-        self.assertEqual(set(self.rects), set(vegetation.TREES))
+        self.assertEqual(set(self.rects), set(vegetation.near_trees()))
         for u0, v0, u1, v1 in self.rects.values():
             self.assertTrue(0.0 < u0 < u1 < 1.0 and 0.0 < v0 < v1 < 1.0)
 

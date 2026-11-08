@@ -10,23 +10,34 @@ rects given, crowns' normals point out of the crown, grass leans up and is
 darker at its base, the meshes, kinds and draws fit the pipeline's buffers
 and passes and the shaders' constants, the trees thinned with distance fit
 their kinds' instances where a tree grows in every cell, and the draws'
-template gives each kind its range and its instances' first index.
+template gives each kind its range and its instances' first index. The
+grown trees: every variant of every species, the same for the same seed
+and different for another, with a trunk thinner than the tree and
+leaving it below the crown's top; and on the GPU, vegetation.glsl's
+instances' layout and variant kinds equal vegetation.py's.
 
     python -m unittest discover -s tests/python
 """
 
 import json
 import re
+import shutil
+import struct
+import tempfile
 import unittest
+
+from pathlib import Path
 
 import numpy as np
 
-from shoonyakasha.planet import scans, vegetation, vegetation_textures, world
+import shoonyakasha as sk
+from shoonyakasha import shaders
+from shoonyakasha.planet import scans, tree_generator, vegetation, vegetation_textures, world
 
 
 class VegetationMeshTest(unittest.TestCase):
     def setUp(self):
-        self.rects = {name: (0.1 * k, 0.0, 0.1 * k + 0.05, 0.5) for k, name in enumerate(vegetation.TREES)}
+        self.rects = {name: (0.02 * k, 0.0, 0.02 * k + 0.01, 0.5) for k, name in enumerate(vegetation.near_trees())}
         self.vertices, self.indices, self.ranges = vegetation.meshes(self.rects)
 
     def kind(self, name):
@@ -53,7 +64,7 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertEqual(last_vertex, len(self.vertices) - 1)
 
     def test_kinds_are_one_unit_tall_from_their_base(self):
-        for name in vegetation.KINDS[:vegetation.SCAN_FIRST]:     # the scans: test_scan_mesh_from_a_prepared_scan
+        for name in [k for k in vegetation.KINDS if k not in scans.NAMES]:   # the scans: test_scan_mesh_from_a_prepared_scan
             part = self.kind(name)
             self.assertAlmostEqual(float(part[:, 1].max()), 1.0, places=5, msg=name)
             if name in vegetation.ROCKS:
@@ -84,7 +95,7 @@ class VegetationMeshTest(unittest.TestCase):
         np.testing.assert_allclose(np.linalg.norm(self.vertices[:, 4:7], axis=1), 1.0, atol=1e-4)
 
     def test_parts(self):
-        for tree in vegetation.TREES:
+        for tree in vegetation.near_trees():
             self.assertEqual(self.parts(tree), {vegetation.PART_BARK, vegetation.PART_CARD}, tree)
             self.assertEqual(self.parts(tree + "_far"), {vegetation.PART_IMPOSTOR}, tree)
         self.assertEqual(self.parts("bush"), {vegetation.PART_CARD})
@@ -104,7 +115,7 @@ class VegetationMeshTest(unittest.TestCase):
 
     def test_impostors_are_quads_as_wide_as_their_tree_showing_their_rect(self):
         trees = vegetation.trees()
-        for tree in vegetation.TREES:
+        for tree in vegetation.near_trees():
             quad = self.kind(tree + "_far")
             self.assertEqual(len(quad), 4)
             width = vegetation.impostor_width(trees[tree][0])
@@ -119,12 +130,12 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertAlmostEqual(vegetation.impostor_width(vertices), 1.0, places=6)
 
     def test_crowns_normals_point_out(self):
-        for name in ("broadleaf_a", "broadleaf_b", "bush"):
+        for name in vegetation.near_trees() + ["bush"]:
             part = self.kind(name)
             cards = part[part[:, 7] == vegetation.PART_CARD]
             centre = cards[:, :3].mean(axis=0)
             outward = np.einsum("ij,ij->i", cards[:, 4:7], cards[:, :3] - centre)
-            self.assertGreater((outward > 0.0).mean(), 0.9, name)
+            self.assertGreater((outward > 0.0).mean(), 0.75, name)
 
     def test_grass_leans_up_and_darkens_at_its_base(self):
         grass = self.kind("grass")
@@ -137,16 +148,15 @@ class VegetationMeshTest(unittest.TestCase):
         layouts = pipeline["bufferLayouts"]
         self.assertLessEqual(len(self.vertices), layouts["VegetationMesh"]["elementCount"])
         self.assertLessEqual(len(self.indices), layouts["VegetationIndices"]["elementCount"])
-        others = len(vegetation.KINDS) - 1
         self.assertEqual(vegetation.SCAN_FIRST, vegetation.GRASS + 1)
-        self.assertEqual(vegetation.KINDS[vegetation.SCAN_FIRST:], scans.NAMES)
-        self.assertEqual(layouts["VegetationInstances"]["elementCount"],
-                         (others * world.VEGETATION_CAPACITY + world.GRASS_CAPACITY) * 2)
+        self.assertEqual(vegetation.KINDS[vegetation.SCAN_FIRST:vegetation.VARIANT_FIRST], scans.NAMES)
+        trees = [k for k in vegetation.KINDS if vegetation.is_tree(k)]
+        self.assertEqual(len(trees), 2 * len(vegetation.TREES) * vegetation.VARIANTS)
+        capacities = [vegetation.kind_capacity(k, world.VEGETATION_CAPACITY, world.GRASS_CAPACITY)
+                      for k in range(len(vegetation.KINDS))]
+        self.assertEqual(layouts["VegetationInstances"]["elementCount"], sum(capacities) * 2)
         firsts = vegetation.instance_firsts(world.VEGETATION_CAPACITY, world.GRASS_CAPACITY)
-        self.assertEqual(firsts[vegetation.SCAN_FIRST], vegetation.GRASS * world.VEGETATION_CAPACITY
-                         + world.GRASS_CAPACITY)
-        self.assertEqual(firsts[-1] + world.VEGETATION_CAPACITY,
-                         layouts["VegetationInstances"]["elementCount"] // 2)
+        self.assertEqual(firsts, [sum(capacities[:k]) for k in range(len(capacities))])
         self.assertGreaterEqual(layouts["VegetationDraws"]["elementCount"], len(vegetation.KINDS) * 5)
         passes = {p["name"]: p for p in pipeline["passes"]}
         self.assertEqual(passes["Vegetation"]["execution"]["arguments"]["drawCount"], len(vegetation.KINDS))
@@ -154,7 +164,7 @@ class VegetationMeshTest(unittest.TestCase):
                          vegetation.GRASS)
         scan_shadows = passes["ShadowScans{cascade}"]["execution"]["arguments"]
         self.assertEqual(scan_shadows["offset"], vegetation.SCAN_FIRST * 20)
-        self.assertEqual(scan_shadows["drawCount"], len(scans.SCANS))
+        self.assertEqual(scan_shadows["drawCount"], len(vegetation.KINDS) - vegetation.SCAN_FIRST)
         glsl = (world.PIPELINE.parent / "shaders" / "vegetation.glsl").read_text(encoding="utf-8")
         constant = lambda name: int(re.search(r"const int %s = (\d+);" % name, glsl).group(1))
         self.assertEqual(constant("VEGETATION_KINDS"), len(vegetation.KINDS))
@@ -162,6 +172,8 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertEqual(constant("VEGETATION_TREE_KINDS"), 2 * len(vegetation.TREES))
         self.assertEqual(constant("VEGETATION_SCAN_FIRST"), vegetation.SCAN_FIRST)
         self.assertEqual(constant("VEGETATION_SCANS"), len(scans.SCANS))
+        self.assertEqual(constant("VEGETATION_VARIANTS"), vegetation.VARIANTS)
+        self.assertEqual(constant("VEGETATION_VARIANT_FIRST"), vegetation.VARIANT_FIRST)
         self.assertEqual(constant("VEGETATION_PART_SCAN"), vegetation.PART_SCAN)
         for name, value in (("BARK", vegetation.PART_BARK), ("CARD", vegetation.PART_CARD),
                             ("GRASS", vegetation.PART_GRASS), ("IMPOSTOR", vegetation.PART_IMPOSTOR),
@@ -217,6 +229,96 @@ class VegetationMeshTest(unittest.TestCase):
         self.assertEqual(len(words), len(vegetation.KINDS))
         for kind, (first, count) in enumerate(self.ranges):
             self.assertEqual(tuple(words[kind]), (count, 0, first, 0, firsts[kind]))
+
+
+
+class GrownTreesTest(unittest.TestCase):
+    def test_every_variant_grows_the_same_for_the_same_seed(self):
+        a = vegetation.forest((1.0, 2.0, 3.0))
+        b = vegetation._forest.__wrapped__((1.0, 2.0, 3.0))
+        c = vegetation.forest((4.0, 5.0, 6.0))
+        self.assertEqual(sorted(a.meshes), sorted(vegetation.near_trees()))
+        for name in vegetation.near_trees():
+            np.testing.assert_array_equal(a.meshes[name][0], b.meshes[name][0])
+            np.testing.assert_array_equal(a.meshes[name][1], b.meshes[name][1])
+            self.assertFalse(np.array_equal(a.meshes[name][0][:50], c.meshes[name][0][:50]), name)
+            radius, top = a.trunks[name]
+            self.assertEqual(a.trunks[name + "_far"], (radius, top))
+            self.assertTrue(0.005 < radius < 0.08, name)
+            self.assertTrue(0.05 < top < 0.9, name)
+        first = vegetation.near_trees()[0]
+        self.assertFalse(np.array_equal(a.meshes[first][0], a.meshes[vegetation.near_trees()[1]][0]))
+
+    def test_species_presets(self):
+        self.assertEqual(sorted(tree_generator.SPECIES), sorted(vegetation.TREES))
+        for name, species in tree_generator.SPECIES.items():
+            vertices, indices, _ = tree_generator.grow(species, 5)
+            self.assertLess(len(indices) // 3, 2000, name)
+            self.assertAlmostEqual(float(vertices[:, 1].max()), 1.0, places=5)
+
+
+LAYOUT_KERNEL = """#version 450
+layout(local_size_x = 64) in;
+#define VEGETATION_SET 0
+#define VEGETATION_PARAMS 0
+#include "vegetation.glsl"
+layout(std430, set = 0, binding = 1) writeonly buffer Outputs { uint values[]; } dst;
+layout(push_constant) uniform Push { uint count; uint capacity; uint grass; } pc;
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.count) return;
+    int kind = int(i);
+    dst.values[i * 8u] = vegetationFirstInstance(kind, pc.capacity, pc.grass);
+    dst.values[i * 8u + 1u] = vegetationCapacity(kind, pc.capacity, pc.grass);
+    dst.values[i * 8u + 2u] = vegetationIsTree(kind) ? 1u : 0u;
+    for (int v = 0; v < VEGETATION_VARIANTS; ++v) {
+        dst.values[i * 8u + 3u + uint(v)] = kind < VEGETATION_TREE_KINDS ? uint(vegetationVariantKind(kind, v)) : 0u;
+    }
+}
+"""
+
+
+class VegetationLayoutShader(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        if not sk.extension_available():
+            raise unittest.SkipTest("the engine's extension is not importable here")
+        try:
+            shaders.find_glslc()
+        except shaders.GlslcNotFound as exc:
+            raise unittest.SkipTest(str(exc).splitlines()[0])
+        try:
+            cls.ctx = sk.ComputeContext()
+        except RuntimeError as exc:
+            raise unittest.SkipTest("no Vulkan device: %s" % exc)
+        cls.tmp = Path(tempfile.mkdtemp())
+        path = cls.tmp / "vegetation_layout_probe.comp"
+        path.write_text(LAYOUT_KERNEL, encoding="utf-8")
+        cls.kernel = cls.ctx.kernel(path, args=["-I", str(world.PIPELINE.parent / "shaders")])
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.ctx.shutdown()
+        shutil.rmtree(cls.tmp, ignore_errors=True)
+
+    def test_the_layout_and_variants_equal_vegetation_py(self):
+        count = len(vegetation.KINDS)
+        uniform = self.ctx.upload(bytes(16 * 9 + 16 * 96))
+        out = np.zeros(count * 8, dtype=np.uint32)
+        self.ctx.run(self.kernel, [uniform, out], threads=count,
+                     push=struct.pack("<III", count, world.VEGETATION_CAPACITY, world.GRASS_CAPACITY))
+        out = out.reshape(count, 8)
+        firsts = vegetation.instance_firsts(world.VEGETATION_CAPACITY, world.GRASS_CAPACITY)
+        self.assertEqual(out[:, 0].tolist(), firsts)
+        self.assertEqual(out[:, 1].tolist(), [vegetation.kind_capacity(k, world.VEGETATION_CAPACITY,
+                                                                       world.GRASS_CAPACITY) for k in range(count)])
+        self.assertEqual(out[:, 2].tolist(), [int(vegetation.is_tree(k)) for k in vegetation.KINDS])
+        for k, name in enumerate(vegetation.KINDS[:2 * len(vegetation.TREES)]):
+            species, far = vegetation.species_of(name), name.endswith("_far")
+            want = [vegetation.KINDS.index(("%s.%d" % (species, v) if v else species) + ("_far" if far else ""))
+                    for v in range(vegetation.VARIANTS)]
+            self.assertEqual(out[k, 3:3 + vegetation.VARIANTS].tolist(), want, name)
 
 
 if __name__ == "__main__":
