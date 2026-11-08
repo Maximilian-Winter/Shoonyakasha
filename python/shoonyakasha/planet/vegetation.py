@@ -18,7 +18,7 @@ the kinds vegetation_scatter.comp and grass_scatter.comp place:
     bush                      a mound of cluster cards
     shrub                     a few upright cards of bare twigs and leaves
     cactus                    a ribbed column with an arm or two
-    rock, boulder             a lumpy, flat-shaded stone (an icosphere
+    rock, boulder             a lumpy, smooth-shaded stone (an icosphere
                               pushed in and out by smooth lobes, squashed),
                               reaching ROCK_SINK below its base into the
                               ground; rock_points(name) gives its points for
@@ -271,7 +271,8 @@ def _rock(seed, flat, subdivisions):
     """A lumpy stone: an icosphere split `subdivisions` times pushed in and
     out by a few smooth lobes, squashed to `flat` of its width, one unit
     tall above its base and reaching ROCK_SINK below it, centred on its
-    axis, flat-shaded, darker towards the bottom."""
+    axis, each corner's normal the mean of its faces' (by area), darker
+    towards the bottom."""
     rng = np.random.default_rng(seed)
     directions, faces = _icosphere(subdivisions)
     radius = np.ones(len(directions))
@@ -286,14 +287,21 @@ def _rock(seed, flat, subdivisions):
     p[:, 1] += -ROCK_SINK - low * scale
     for axis in (0, 2):
         p[:, axis] -= 0.5 * (p[:, axis].min() + p[:, axis].max())
-    b = _Builder()
+    outward = []
+    smooth = np.zeros_like(p)
     for a, c, d in faces:
-        corners = p[[a, c, d]]
-        normal = _unit(np.cross(corners[1] - corners[0], corners[2] - corners[0]))
-        if np.dot(normal, corners.mean(axis=0) - (0.0, 0.5 - 0.5 * ROCK_SINK, 0.0)) < 0.0:
-            corners, normal = corners[::-1], -normal
-        k = [b.vertex(q, normal, PART_PLAIN, float(np.clip(0.65 + 0.35 * (q[1] + ROCK_SINK), 0.6, 1.0)), (0.0, 0.0))
-             for q in corners]
+        face = [a, c, d]
+        corners = p[face]
+        cross = np.cross(corners[1] - corners[0], corners[2] - corners[0])
+        if np.dot(cross, corners.mean(axis=0) - (0.0, 0.5 - 0.5 * ROCK_SINK, 0.0)) < 0.0:
+            face, cross = face[::-1], -cross
+        outward.append(face)
+        smooth[face] += cross
+    smooth /= np.linalg.norm(smooth, axis=1, keepdims=True)
+    b = _Builder()
+    for face in outward:
+        k = [b.vertex(p[i], smooth[i], PART_PLAIN, float(np.clip(0.65 + 0.35 * (p[i][1] + ROCK_SINK), 0.6, 1.0)),
+                      (0.0, 0.0)) for i in face]
         b.indices += k
     return b
 

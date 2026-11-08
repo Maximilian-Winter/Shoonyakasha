@@ -57,6 +57,7 @@ layout(location = 10) out vec3 fragLocal;
 layout(location = 11) flat out int fragResource;   // an ore rock's resource id, 0 for anything else
 layout(location = 12) out vec3 fragTangent;          // a scan's; zero for anything else
 layout(location = 13) flat out vec4 fragCell;        // a scan's cell in the scans' atlas
+layout(location = 14) flat out int fragRock;         // 1 for an instance of the rocks' or boulders' kinds
 
 const float HUE_SPREAD = 0.3;       // a plant's foliage warmer or cooler by up to half this, by its tint
 const float CARD_SPREAD = 0.3;      // a leaf card lighter or darker by up to half this, by its phase
@@ -139,6 +140,10 @@ void main() {
     fragUp = up;
     fragFacing = ahead;
     fragOnMoon = vegetationOnMoon(look.w) ? 1 : 0;
+    uint capacity = uint(vegetation.lod.z), grassCapacity = uint(vegetation.grass.w);
+    uint instance = uint(gl_InstanceIndex);
+    fragRock = instance >= vegetationFirstInstance(VEGETATION_ROCK, capacity, grassCapacity)
+            && instance < vegetationFirstInstance(VEGETATION_GRASS, capacity, grassCapacity) ? 1 : 0;
     fragLocal = local;
     fragResource = vegetationOre(look.w) ? int(vegetationResource(look.z)) : 0;
     gl_Position = jittered(camera.proj * camera.view * vec4(relativePos, 1.0));

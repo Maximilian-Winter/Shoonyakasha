@@ -12,7 +12,11 @@
 //               impostorTexel), times 2 and the plant's colour where its
 //               normal's alpha marks foliage; its normal from the views'
 //               normals in the tree's frame
-//     plain     the plant's colour times the shade
+//     plain     the plant's colour times the shade; a rock's (fragRock)
+//               also times its grain (rockGrain): ROCK_GRAIN of a noise on
+//               its mesh's own position over three octaves, the finest
+//               ROCK_GRAIN_SCALE across a unit of its height, which bumps
+//               its normal by ROCK_BUMP as well
 //     scan      its material's texel in the scans' atlas (foliage.glsl's
 //               scanTexel) times the plant's colour, not drawn where a
 //               cut-out material's coverage is below 1/2; its normal from
@@ -72,6 +76,7 @@ layout(location = 10) in vec3 fragLocal;
 layout(location = 11) flat in int fragResource;
 layout(location = 12) in vec3 fragTangent;
 layout(location = 13) flat in vec4 fragCell;
+layout(location = 14) flat in int fragRock;
 
 layout(location = 0) out vec4 outColor;
 
@@ -95,6 +100,25 @@ const float ORE_SPECK_CELLS = 24.0; // cells per unit of the mesh (its height) t
 const float ORE_SPECK_SHARE = 0.12; // of the cells that hold a speck
 const float ORE_SPECK_RADIUS = 0.3; // of a cell
 const float ORE_SPECK_GLOW = 0.2;   // of the sun's illuminance over pi
+const float ROCK_GRAIN = 0.6;
+const float ROCK_GRAIN_SCALE = 12.0;
+const float ROCK_BUMP = 0.6;
+
+// A rock's grain at `local` (its mesh's position): about -1 .. 1.
+float rockGrain(vec3 local) {
+    vec3 q = local * ROCK_GRAIN_SCALE;
+    return 0.25 * noise3(q) + 0.35 * noise3(q * 0.37 + 17.3) + 0.4 * noise3(q * 0.13 + 41.7);
+}
+
+// `normal` tilted by the screen-space slope of `bump` over the surface at `position`.
+vec3 bumped(vec3 normal, vec3 position, float bump) {
+    vec3 dx = dFdx(position), dy = dFdy(position);
+    vec3 r1 = cross(dy, normal), r2 = cross(normal, dx);
+    float det = dot(dx, r1);
+    if (abs(det) < 1e-12) return normal;
+    vec3 gradient = sign(det) * (dFdx(bump) * r1 + dFdy(bump) * r2);
+    return normalize(abs(det) * normal - gradient);
+}
 
 // An ore rock's glowing specks: 1 inside a speck, 0 elsewhere. A speck is a
 // sphere of ORE_SPECK_RADIUS of a cell around a hashed point of the cells
@@ -164,6 +188,12 @@ void main() {
     } else {
         albedo = fragColour * fragShade;
         foliage = false;
+        if (fragRock == 1) {
+            float grain = rockGrain(fragLocal);
+            albedo *= 1.0 + ROCK_GRAIN * grain;
+            normal = bumped(normal, fragRelativePos, ROCK_BUMP * grain * length(dFdx(fragRelativePos)) /
+                            max(length(dFdx(fragLocal)), 1e-6) / ROCK_GRAIN_SCALE);
+        }
     }
     if (!drawn) discard;
 

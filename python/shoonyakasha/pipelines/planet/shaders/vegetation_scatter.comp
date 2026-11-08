@@ -296,10 +296,23 @@ uint rockResource(int body, vec3 radial, vec3 climate, float ore) {
     return body == 1 ? moonResource(radial) : planetResource(radial, climate.x, climate.y);
 }
 
-// A rock's colour: the body's rock colour, an ore rock's mixed towards its
-// resource's tint by ORE_TINT_SHARE times 1 + its richness, and VEGETATION_ORE.
-float packedRockColour(int body, float ore, uint resourceId) {
+// A rock's colour: the body's rock colour (on the planet ROCK_SOIL of the
+// way towards its biomes' soil at `climate`, times ROCK_SHADE), an ore
+// rock's mixed towards its resource's tint by ORE_TINT_SHARE times 1 + its
+// richness, and VEGETATION_ORE.
+const float ROCK_SOIL = 0.4;
+const float ROCK_SHADE = 0.65;
+
+float packedRockColour(int body, vec3 climate, float ore, uint resourceId) {
     vec3 colour = rockColour(body);
+    if (body == 0) {
+        vec3 c = climateWithSettings(climate);
+        float biomes[BIOMES];
+        biomeWeights(c.x, c.y, biomes);
+        vec3 soil = vec3(0.0);
+        for (int b = 0; b < BIOMES; ++b) soil += biomes[b] * biomeSoil(b);
+        colour = mix(colour, soil, ROCK_SOIL) * ROCK_SHADE;
+    }
     float flags = body == 1 ? VEGETATION_ON_MOON : 0.0;
     if (ore > ORE_ROCKS) {
         colour = mix(colour, oreTint(resourceId), ORE_TINT_SHARE * (1.0 + ore));
@@ -515,7 +528,7 @@ void main() {
                              * smoothstep(bushRange, bushRange * FADE_START, x.distance);
                 if (size < 0.05) continue;
                 uint resourceId = rockResource(chunk.body, radial, climate, ore);
-                colour = packedRockColour(chunk.body, ore, resourceId);
+                colour = packedRockColour(chunk.body, climate, ore, resourceId);
                 place(chunk, x, kind, size, turn, tint, colour, oreGrade(ore), resourceId, vec3(0.0), 0.0);
                 continue;
             }
@@ -576,7 +589,7 @@ void main() {
             continue;
         }
         uint resourceId = rockResource(chunk.body, radial, climate, ore);
-        place(chunk, x, KIND_ROCK, size, turn, tint, packedRockColour(chunk.body, ore, resourceId), oreGrade(ore),
+        place(chunk, x, KIND_ROCK, size, turn, tint, packedRockColour(chunk.body, climate, ore, resourceId), oreGrade(ore),
               resourceId, vec3(0.0), 0.0);
     }
 }
