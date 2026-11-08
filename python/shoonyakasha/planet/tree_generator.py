@@ -210,7 +210,7 @@ def grow(species, seed):
     last = len(species.levels) - 1
     for b in grown:
         level = species.levels[b.level]
-        tube(builder, b, level.segments, 0.8 if b.level == 0 else 0.9, len(species.levels))
+        tube(builder, b, level.segments, 1.0, len(species.levels))
     leaves = species.leaves
     placed = []
     for b in grown:
@@ -276,7 +276,7 @@ SPECIES = {
                gnarliness=0.18, sections=3, segments=5),
          Level(children=5, start=0.25, angle=40.0, length=0.5, radius=0.55, taper=0.4, gnarliness=0.25,
                sections=2, segments=3)],
-        Leaves(("broadleaf_a", "broadleaf_b"), count=5, start=0.2, size=0.22, angle=45.0, up=0.3),
+        Leaves(("broadleaf_a", "broadleaf_b"), count=16, start=0.05, size=0.13, angle=45.0, up=0.3),
         force=(0.0, 1.0, 0.0), force_strength=0.1, trunk_radius=0.045),
     "broadleaf_b": Species(             # a tall oval crown
         "broadleaf_b",
@@ -285,7 +285,7 @@ SPECIES = {
                gnarliness=0.15, sections=3, segments=5),
          Level(children=4, start=0.25, angle=35.0, length=0.45, radius=0.55, taper=0.4, gnarliness=0.25,
                sections=2, segments=3)],
-        Leaves(("broadleaf_a", "broadleaf_b"), count=5, start=0.2, size=0.2, angle=40.0, up=0.4),
+        Leaves(("broadleaf_a", "broadleaf_b"), count=16, start=0.05, size=0.12, angle=40.0, up=0.4),
         force=(0.0, 1.0, 0.0), force_strength=0.25, trunk_radius=0.043),
     "fir": Species(                     # a narrow fir: level branches of flat sprays to the top
         "fir",
@@ -301,6 +301,6 @@ SPECIES = {
                sections=3, segments=5),
          Level(children=6, start=0.45, angle=75.0, length=0.4, radius=0.5, taper=0.4, gnarliness=0.1,
                sections=2, segments=3)],
-        Leaves(("acacia",), count=6, start=0.1, size=0.3, angle=60.0, up=0.0, flat=True, flatten=0.6),
+        Leaves(("acacia",), count=14, start=0.05, size=0.19, angle=60.0, up=0.0, flat=True, flatten=0.6),
         force=(0.0, 1.0, 0.0), force_strength=0.1, trunk_radius=0.04, crown_normal=0.5),
 }

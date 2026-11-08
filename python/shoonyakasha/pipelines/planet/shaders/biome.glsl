@@ -68,16 +68,17 @@ const vec3 ROCK = vec3(0.30, 0.27, 0.25);
 const vec3 SNOW = vec3(0.85, 0.87, 0.90);
 
 // Per biome: the bare ground (soil), the low plants (plant) and the forest
-// seen from above (canopy), linear albedo on Earth's palette.
+// seen from above (canopy), linear albedo on Earth's palette, the plants'
+// and the canopies' a little less saturated than Earth's.
 const vec3 BIOME_SOIL[BIOMES] = vec3[BIOMES](
     vec3(0.50, 0.36, 0.21), vec3(0.38, 0.26, 0.14), vec3(0.21, 0.14, 0.08), vec3(0.27, 0.22, 0.14),
     vec3(0.28, 0.22, 0.14), vec3(0.22, 0.16, 0.10), vec3(0.20, 0.17, 0.13), vec3(0.17, 0.15, 0.12));
 const vec3 BIOME_PLANT[BIOMES] = vec3[BIOMES](
-    vec3(0.32, 0.26, 0.12), vec3(0.36, 0.26, 0.07), vec3(0.06, 0.20, 0.03), vec3(0.20, 0.19, 0.06),
-    vec3(0.12, 0.25, 0.05), vec3(0.11, 0.22, 0.04), vec3(0.08, 0.16, 0.06), vec3(0.12, 0.12, 0.05));
+    vec3(0.311, 0.260, 0.141), vec3(0.346, 0.261, 0.100), vec3(0.075, 0.194, 0.049), vec3(0.197, 0.189, 0.078),
+    vec3(0.133, 0.244, 0.074), vec3(0.121, 0.215, 0.062), vec3(0.088, 0.156, 0.071), vec3(0.119, 0.119, 0.060));
 const vec3 BIOME_CANOPY[BIOMES] = vec3[BIOMES](
-    vec3(0.16, 0.15, 0.07), vec3(0.11, 0.12, 0.04), vec3(0.02, 0.09, 0.02), vec3(0.07, 0.09, 0.03),
-    vec3(0.05, 0.11, 0.03), vec3(0.05, 0.11, 0.03), vec3(0.03, 0.07, 0.04), vec3(0.08, 0.09, 0.05));
+    vec3(0.157, 0.149, 0.085), vec3(0.110, 0.118, 0.054), vec3(0.030, 0.086, 0.030), vec3(0.072, 0.088, 0.040),
+    vec3(0.058, 0.106, 0.042), vec3(0.058, 0.106, 0.042), vec3(0.036, 0.068, 0.044), vec3(0.081, 0.089, 0.057));
 
 // The trees' and bushes' foliage, of their biome's canopy colour (which
 // takes in the shade between the crowns).
