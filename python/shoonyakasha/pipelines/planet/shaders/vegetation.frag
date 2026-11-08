@@ -13,10 +13,10 @@
 //               normal's alpha marks foliage; its normal from the views'
 //               normals in the tree's frame
 //     plain     the plant's colour times the shade; a rock's (fragRock)
-//               also times its grain (rockGrain): ROCK_GRAIN of a noise on
-//               its mesh's own position over three octaves, the finest
-//               ROCK_GRAIN_SCALE across a unit of its height, which bumps
-//               its normal by ROCK_BUMP as well
+//               also times twice its surface (rockAlbedo, its brightness
+//               alone on the moon), projected three ways in its own frame
+//               at ROCK_TILE m a tile (rockTexel), whose normal map
+//               (rockNormal) tilts its normal
 //     scan      its material's texel in the scans' atlas (foliage.glsl's
 //               scanTexel) times the plant's colour, not drawn where a
 //               cut-out material's coverage is below 1/2; its normal from
@@ -77,6 +77,8 @@ layout(location = 11) flat in int fragResource;
 layout(location = 12) in vec3 fragTangent;
 layout(location = 13) flat in vec4 fragCell;
 layout(location = 14) flat in int fragRock;
+layout(location = 15) in vec3 fragRockPosition;
+layout(location = 16) in vec3 fragRockNormal;
 
 layout(location = 0) out vec4 outColor;
 
@@ -100,24 +102,27 @@ const float ORE_SPECK_CELLS = 24.0; // cells per unit of the mesh (its height) t
 const float ORE_SPECK_SHARE = 0.12; // of the cells that hold a speck
 const float ORE_SPECK_RADIUS = 0.3; // of a cell
 const float ORE_SPECK_GLOW = 0.2;   // of the sun's illuminance over pi
-const float ROCK_GRAIN = 0.6;
-const float ROCK_GRAIN_SCALE = 12.0;
-const float ROCK_BUMP = 0.6;
+const float ROCK_TILE = 1.2;        // m
 
-// A rock's grain at `local` (its mesh's position): about -1 .. 1.
-float rockGrain(vec3 local) {
-    vec3 q = local * ROCK_GRAIN_SCALE;
-    return 0.25 * noise3(q) + 0.35 * noise3(q * 0.37 + 17.3) + 0.4 * noise3(q * 0.13 + 41.7);
-}
-
-// `normal` tilted by the screen-space slope of `bump` over the surface at `position`.
-vec3 bumped(vec3 normal, vec3 position, float bump) {
-    vec3 dx = dFdx(position), dy = dFdy(position);
-    vec3 r1 = cross(dy, normal), r2 = cross(normal, dx);
-    float det = dot(dx, r1);
-    if (abs(det) < 1e-12) return normal;
-    vec3 gradient = sign(det) * (dFdx(bump) * r1 + dFdy(bump) * r2);
-    return normalize(abs(det) * normal - gradient);
+// A rock's surface at `position` (m, its own frame) facing `normal` (its
+// frame): the three axes' projections blended by the normal's components
+// to the 4th power; `albedo` the texel, `tilted` the normal with the
+// projections' normal maps blended on (whiteout).
+void rockTexel(vec3 position, vec3 normal, out vec3 albedo, out vec3 tilted) {
+    vec3 w = pow(abs(normal), vec3(4.0));
+    w /= w.x + w.y + w.z;
+    vec3 uv = position / ROCK_TILE;
+    vec2 planes[3] = vec2[3](uv.zy, uv.xz, uv.xy);
+    albedo = w.x * texture(rockAlbedo, planes[0]).rgb + w.y * texture(rockAlbedo, planes[1]).rgb
+           + w.z * texture(rockAlbedo, planes[2]).rgb;
+    vec3 tx = texture(rockNormal, planes[0]).xyz * 2.0 - 1.0;
+    vec3 ty = texture(rockNormal, planes[1]).xyz * 2.0 - 1.0;
+    vec3 tz = texture(rockNormal, planes[2]).xyz * 2.0 - 1.0;
+    tx = vec3(tx.xy + normal.zy, abs(tx.z) * normal.x);
+    ty = vec3(ty.xy + normal.xz, abs(ty.z) * normal.y);
+    tz = vec3(tz.xy + normal.xy, abs(tz.z) * normal.z);
+    tilted = tx.zyx * w.x + ty.xzy * w.y + tz.xyz * w.z;
+    tilted = normalize(tilted);
 }
 
 // An ore rock's glowing specks: 1 inside a speck, 0 elsewhere. A speck is a
@@ -189,10 +194,13 @@ void main() {
         albedo = fragColour * fragShade;
         foliage = false;
         if (fragRock == 1) {
-            float grain = rockGrain(fragLocal);
-            albedo *= 1.0 + ROCK_GRAIN * grain;
-            normal = bumped(normal, fragRelativePos, ROCK_BUMP * grain * length(dFdx(fragRelativePos)) /
-                            max(length(dFdx(fragLocal)), 1e-6) / ROCK_GRAIN_SCALE);
+            vec3 surface, tilted;
+            vec3 own = normalize(fragRockNormal);
+            rockTexel(fragRockPosition, own, surface, tilted);
+            if (fragOnMoon == 1) surface = vec3(dot(surface, vec3(0.2126, 0.7152, 0.0722)));
+            albedo *= 2.0 * surface;
+            vec3 change = tilted - own;
+            normal = normalize(normal + fragRight * change.x + fragUp * change.y + fragFacing * change.z);
         }
     }
     if (!drawn) discard;

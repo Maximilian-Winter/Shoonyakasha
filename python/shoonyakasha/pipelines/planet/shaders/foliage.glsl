@@ -2,7 +2,8 @@
 // set FOLIAGE_SET): the foliage atlas, the bark tile and the trees'
 // impostors with their normals (shoonyakasha.planet.vegetation_textures and
 // vegetation_impostors), the scans' albedo and normal atlases
-// (shoonyakasha.planet.scans.atlas), and the alpha test the vegetation's
+// (shoonyakasha.planet.scans.atlas), the rocks' surface and its normal map
+// (vegetation_textures.rock), and the alpha test the vegetation's
 // fragment shaders share. impostorTexel blends a tree's octahedral views
 // (impostor_oct.glsl).
 
@@ -14,6 +15,8 @@ layout(set = FOLIAGE_SET, binding = 2) uniform sampler2D vegetationImpostor;
 layout(set = FOLIAGE_SET, binding = 3) uniform sampler2D vegetationImpostorNormal;
 layout(set = FOLIAGE_SET, binding = 4) uniform sampler2D scanAlbedo;
 layout(set = FOLIAGE_SET, binding = 5) uniform sampler2D scanNormal;
+layout(set = FOLIAGE_SET, binding = 6) uniform sampler2D rockAlbedo;
+layout(set = FOLIAGE_SET, binding = 7) uniform sampler2D rockNormal;
 
 // Mip levels a scan's texel is read at, at most, so its cell's neighbours
 // do not bleed into it.

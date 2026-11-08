@@ -33,6 +33,13 @@ down and right (both of the card's size), covers them.
 are downloaded (`available()`), else what is drawn here; baking needs
 Pillow. PlanetWorld.setup hands them to the pipeline's "vegetationAtlas"
 and "vegetationBark" external images.
+
+`rock()` gives the rocks' surface (ROCK_ASSET), ROCK_SIZE square: (albedo
+RGBA in sRGB, its channels scaled to a mean of CARD_MEAN (linear) and
+turned towards their grey to keep ROCK_CHROMA of their colour; normal map
+RGBA, OpenGL's convention), from its scan when downloaded
+(`rock_available()`), else a noise of the same mean and a flat normal
+map. PlanetWorld.setup hands them to "rockAlbedo" and "rockNormal".
 """
 
 import io
@@ -71,11 +78,23 @@ FIR_CARDS = {"fir_a": ("fir_twig_main", "conifer_a"), "fir_b": ("fir_twig_tip", 
 CARD_MEAN = 0.5
 CARD_CHROMA = 0.3       # of a card's colour (after its channels are scaled to CARD_MEAN) kept, its grey all
 BARK_SIZE = 512
+ROCK_ASSET = "Rock030"   # ambientCG
+ROCK_SIZE = 1024
+ROCK_CHROMA = 0.5
 
 
 def paths(element):
     """(colour, opacity) JPEG paths of an element's scan; the bark has no opacity."""
     return (os.path.join(DIRECTORY, element + "_color.jpg"), os.path.join(DIRECTORY, element + "_opacity.jpg"))
+
+
+def rock_paths():
+    """(colour, normal) JPEG paths of the rocks' surface scan."""
+    return (os.path.join(DIRECTORY, "rock_color.jpg"), os.path.join(DIRECTORY, "rock_normal.jpg"))
+
+
+def rock_available():
+    return all(os.path.exists(p) for p in rock_paths())
 
 
 def _get(url):
@@ -100,6 +119,17 @@ def fetch():
         archive = zipfile.ZipFile(io.BytesIO(_get("https://ambientcg.com/get?file=%s_1K-JPG.zip" % asset)))
         names = archive.namelist()
         for path, suffix in zip(wanted, ("_Color.jpg", "_Opacity.jpg")):
+            with open(path, "wb") as f:
+                f.write(archive.read(next(n for n in names if n.endswith(suffix))))
+    site = "https://ambientcg.com/view?id=" + ROCK_ASSET
+    credits.append("- rock: %s (%s)" % (ROCK_ASSET, site))
+    if rock_available():
+        print("have rock")
+    else:
+        print("fetching rock from", site, flush=True)
+        archive = zipfile.ZipFile(io.BytesIO(_get("https://ambientcg.com/get?file=%s_1K-JPG.zip" % ROCK_ASSET)))
+        names = archive.namelist()
+        for path, suffix in zip(rock_paths(), ("_Color.jpg", "_NormalGL.jpg")):
             with open(path, "wb") as f:
                 f.write(archive.read(next(n for n in names if n.endswith(suffix))))
     with open(os.path.join(DIRECTORY, "CREDITS.md"), "w", encoding="utf-8") as f:
@@ -460,6 +490,31 @@ def bark(scanned=None, seed=5):
     rgb = np.stack([0.42 * value, 0.36 * value, 0.30 * value], -1)
     out = np.concatenate([_linear_to_srgb(np.clip(rgb, 0, 1)), np.ones((BARK_SIZE, BARK_SIZE, 1))], -1)
     return (out * 255 + 0.5).astype(np.uint8)
+
+
+def rock(scanned=None, seed=9):
+    """The rocks' surface: (albedo, normal map), each uint8 RGBA ROCK_SIZE square."""
+    use_scan = rock_available() if scanned is None else scanned
+    if use_scan:
+        from PIL import Image
+        colour_path, normal_path = rock_paths()
+        rgb = np.asarray(Image.open(colour_path).convert("RGB").resize((ROCK_SIZE, ROCK_SIZE), Image.BICUBIC))
+        normal = np.asarray(Image.open(normal_path).convert("RGBA").resize((ROCK_SIZE, ROCK_SIZE), Image.BICUBIC))
+        linear = _srgb_to_linear(rgb.astype(np.float64) / 255.0)
+    else:
+        rng = np.random.default_rng(seed)
+        grain = np.zeros((ROCK_SIZE, ROCK_SIZE))
+        for f in (4, 16, 64):
+            coarse = rng.normal(0.0, 1.0, (f, f))
+            grain += np.kron(coarse, np.ones((ROCK_SIZE // f, ROCK_SIZE // f))) / f ** 0.5
+        linear = np.repeat((0.5 + 0.12 * grain)[..., None], 3, axis=-1)
+        normal = np.zeros((ROCK_SIZE, ROCK_SIZE, 4), np.uint8)
+        normal[...] = (128, 128, 255, 255)
+    linear = linear / np.maximum(linear.mean(axis=(0, 1)), 1e-4) * CARD_MEAN
+    grey = (linear @ np.array([0.2126, 0.7152, 0.0722]))[..., None]
+    linear = grey + ROCK_CHROMA * (linear - grey)
+    albedo = np.concatenate([_linear_to_srgb(np.clip(linear, 0.0, 1.0)), np.ones((ROCK_SIZE, ROCK_SIZE, 1))], -1)
+    return (albedo * 255.0 + 0.5).astype(np.uint8), np.ascontiguousarray(normal, np.uint8)
 
 
 if __name__ == "__main__":
