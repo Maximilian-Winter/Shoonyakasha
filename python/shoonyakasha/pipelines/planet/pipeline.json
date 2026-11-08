@@ -644,7 +644,11 @@
         { "binding": 4, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "scanAlbedo",
           "externalImage": "scanAlbedo", "autoBindSampler": "groundRepeat" },
         { "binding": 5, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "scanNormal",
-          "externalImage": "scanNormal", "autoBindSampler": "groundRepeat" }
+          "externalImage": "scanNormal", "autoBindSampler": "groundRepeat" },
+        { "binding": 6, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "rockAlbedo",
+          "externalImage": "rockAlbedo", "autoBindSampler": "groundRepeat" },
+        { "binding": 7, "type": "combined_image_sampler", "stages": [ "fragment" ], "name": "rockNormal",
+          "externalImage": "rockNormal", "autoBindSampler": "groundRepeat" }
       ]
     },
     "groundSet": {

@@ -112,6 +112,14 @@ class AtlasTest(unittest.TestCase):
         self.assertEqual(bark.shape, (vt.BARK_SIZE, vt.BARK_SIZE, 4))
         self.assertTrue((bark[..., 3] == 255).all())
 
+    def test_drawn_rock_surface_has_card_mean_and_a_flat_normal_map(self):
+        albedo, normal = vt.rock(scanned=False)
+        self.assertEqual(albedo.shape, (vt.ROCK_SIZE, vt.ROCK_SIZE, 4))
+        self.assertEqual(normal.shape, (vt.ROCK_SIZE, vt.ROCK_SIZE, 4))
+        mean = _linear(albedo[..., :3].reshape(-1, 3).astype(float)).mean(axis=0)
+        np.testing.assert_allclose(mean, vt.CARD_MEAN, atol=0.03)
+        self.assertTrue((normal == (128, 128, 255, 255)).all())
+
 
 @unittest.skipUnless(HAVE_PIL, "Pillow is needed to bake the textures")
 def oct_encode(d):
